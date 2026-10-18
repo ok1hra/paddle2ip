@@ -40,7 +40,7 @@ paddle ─► Paddle2IP: iambic keyer ─► sidetone (buzzer / headphones, 0 ms
    `oi3.cfg` on the SD card and restart it.
 5. **Key**: the ring turns green when the server answers. Turn the knob for
    WPM, a short press selects the next function (tone, volume, delay, iambic
-   A/B, rotation, test, monitor, info), a long press shows the info page.
+   A/B, rotation, test, monitor, info), a long press shows the service page.
 
 Details: [First setup](#first-setup), [Operation](#operation).
 
@@ -51,7 +51,7 @@ Details: [First setup](#first-setup), [Operation](#operation).
 - [Build and flash](#build-and-flash)
 - [First setup](#first-setup)
 - [Operation](#operation)
-  - [Display](#display)
+  - [Screens](#screens)
   - [Encoder and button](#encoder-and-button)
   - [Setup mode](#setup-mode)
   - [WiFi](#wifi)
@@ -142,24 +142,90 @@ survive unless the user chooses erase.
 
 ## Operation
 
-### Display
+### Screens
+
+| Screen | How to get there |
+|---|---|
+| [Main screen](#main-screen) | normal operation; the centre shows the selected [function](#encoder-and-button) |
+| [Info](#info-function) | function *Info* (short presses) |
+| [Service page](#service-page) | long press, from any screen; short or long press closes it |
+| [Setup screen](#setup-screen) | button held at power-on, or no network saved |
+
+#### Main screen
 
 | Area | Content |
 |---|---|
-| top | rig frequency `14 023.75` (from the server); the sequencer level n colours the last n digits red (0 = none) |
-| centre | big value of the selected encoder function (normally WPM) |
-| left of centre | WiFi signal, vertical bargraph (bottom segment = weakest) |
-| right of centre | WiFi signal in dBm, below it uplink/downlink packet loss in % |
-| warning line | NO KEY, NO WIFI, NO SERVER, NO LINK, SYNC (stale nonce), INTERLOCK, TUNE, TRX NOT CW, MUTED |
-| bottom | `RTT last/min ms`, playout delay D in use, server `L lost/late` edge counters |
-| ring | **red** = TX on the server (PTT sequencer up, the whole over, not each element), green = live link, grey = no link |
+| ring | **red**, thick and fading to black towards the centre = TX on the server (PTT sequencer up, the whole over, not each element); dark green = live link (the server answers our session); grey = no link |
+| top | rig frequency `14 023.75` (MHz kHz.Hz/10, from the server; `-- ---.--` = unknown). The sequencer level n colours the last n digits red (0 = none, 5 = five digits) |
+| centre | big value of the selected function: WPM in white, the others in yellow with their name below (`TONE Hz`, `VOLUME %`, `DELAY ms`, …). *Monitor* shows `CONN`/`DISC` and the element trace instead |
+| left of centre | WiFi signal, vertical bargraph of 4 segments (bottom = weakest) |
+| right of centre | WiFi signal in dBm; below it the packet loss `up/down %` (up = Paddle2IP → server as reported by the server, down = server → Paddle2IP; `-` = not known yet) |
+| warning line | the first applicable warning, see below; empty when all is well |
+| bottom | `RTT 23/18 D80 L0/0`, see below |
 
 WiFi signal colour: green ≥ −65 dBm, orange −65 … −75 dBm (at the edge), red
 below −75 dBm (drop-outs likely). Thresholds: `RSSI_GOOD` / `RSSI_EDGE` in `shared.h`.
 
+Bottom line `RTT 23/18 D80 L0/0` (the [service page](#service-page) has a legend):
+
+| Field | Meaning |
+|---|---|
+| `RTT 23/18` | round-trip time to the server in ms: last / minimum of the last ~5 s. `RTT --` = no measurement (no link) |
+| `D80` | playout delay in ms the server uses (your *Delay D*, or the server default `RkeyDelayMs`) |
+| `L0/0` | server edge counters: lost (never received, the gap was longer than the redundancy) / late (arrived after their playout time and were shifted) |
+
+Warnings, in order of priority (only the first one is shown):
+
+| Warning | Meaning |
+|---|---|
+| `NO KEY` | no shared key configured |
+| `NO WIFI` | not connected to a WiFi network |
+| `NO SERVER` | no server address, or the host name does not resolve |
+| `NO LINK` | no STATUS from the server for 1 s |
+| `SYNC` (orange) | the server refused a stale nonce; resolves itself with the next STATUS |
+| `INTERLOCK` | PA interlock active on the server, keying blocked |
+| `TUNE` (orange) | low-power tune running on the server, keying refused |
+| `TRX NOT CW` | the rig is not in CW or CW-R, keying blocked |
+| `MUTED` (orange) | see below |
+
 MUTED: after any abort (link loss, interlock, …) the server keeps the stream
 muted until the next word gap or until you stop sending, so a broken
 character is never transmitted. Just continue with the next word.
+
+#### Info function
+
+The function *Info* (and only it) replaces the main screen: `Paddle2IP`, the
+firmware revision `FW YYYYMMDD`, a QR code and the text of the GitHub URL and
+the own IP address (`AP 192.168.4.1` when only the own AP runs, `no IP`
+without a network). It returns to WPM 60 s after the last change.
+
+#### Service page
+
+Long press, from any screen; a short or long press closes it.
+
+| Line | Content |
+|---|---|
+| `Paddle2IP YYYYMMDD` | firmware version |
+| `AP Paddle2IP-XXXX`, `http://192.168.4.1` | only while the own AP runs |
+| `SSID -62dBm`, `http://<IP>` | joined network and signal (colour as on the main screen) and the web page address; `STA <state>` when not connected |
+| `SRV <host>:<port>` | server address |
+| `sessID XXXX tx N` | session id of this boot and the number of packets sent |
+| `bad tag N \| B key swap` | STATUS packets with a wrong authentication tag (wrong key or spoofing), iambic mode A/B, `swap` = paddles swapped |
+| `login admin / <password>` | web page login |
+| legend | meaning of the main screen bottom line: `RTT` last / min ms, `D` playout delay ms, `L` lost / late edges |
+
+#### Setup screen
+
+Yellow ring. See [Setup mode](#setup-mode).
+
+| Line | Content |
+|---|---|
+| `SETUP` | |
+| `Paddle2IP-XXXX`, `pass <password>` | name and WPA2 password of the own AP |
+| `http://192.168.4.1` | configuration page |
+| list | `best in range` (the strongest saved network in range) and the saved networks `1: SSID` … `3: SSID`; the selected one is highlighted. `no saved WiFi` when nothing is saved |
+| state | WiFi state, `scanning...` while scanning |
+| `turn = select, press = join` | |
 
 ### Encoder and button
 
@@ -167,7 +233,7 @@ character is never transmitted. Just continue with the next word.
 |---|---|---|
 | turn | change the selected value | select a network |
 | short press | next function | join the selected network |
-| long press | info page (IP, RSSI, server, session, counters, login) | info page |
+| long press | [service page](#service-page) (IP, RSSI, server, session, counters, login, legend) | service page |
 
 Functions (one detent = one step; the display returns to WPM 20 s after the last change):
 

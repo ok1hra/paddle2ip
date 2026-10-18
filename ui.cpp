@@ -8,7 +8,8 @@
 // the last change (info: INFO_HOLD_MS, monitor: stays).
 // Setup screen (AP mode): encoder selects a saved network or "best in range",
 // short press joins it; on success Paddle2IP leaves setup mode.
-// Long press (both): info page (IP, RSSI, server, counters).
+// Long press (both): service page (IP, RSSI, server, counters, legend of the
+// main screen bottom line).
 #include "shared.h"
 #include "rkey_proto.h"
 #include <M5Dial.h>
@@ -137,7 +138,16 @@ static const char* warning(const LinkState& L, uint16_t* col) {
 template <class G> static void fit_size(G& g, const char* t, float maxSize) {
   g.setTextSize(1);
   int w = g.textWidth(t);
-  g.setTextSize(w > 0 && 110.0f / w < maxSize ? 110.0f / w : maxSize);
+  g.setTextSize(w > 0 && 104.0f / w < maxSize ? 104.0f / w : maxSize);
+}
+
+// text with a 1 px black outline, readable on the red TX glow
+template <class G> static void draw_halo(G& g, const char* t, int x, int y, uint16_t col) {
+  static const int8_t d[4][2] = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } };
+  g.setTextColor(TFT_BLACK);
+  for (int i = 0; i < 4; i++) g.drawString(t, x + d[i][0], y + d[i][1]);
+  g.setTextColor(col);
+  g.drawString(t, x, y);
 }
 
 // WiFi signal beside the centre value: vertical bargraph on the left (bottom =
@@ -151,7 +161,7 @@ template <class G> static void draw_signal(G& g, const LinkState& L) {
   int bars = !up ? 0 : rssi >= -55 ? 4 : rssi >= RSSI_GOOD ? 3 : rssi >= RSSI_EDGE ? 2 : 1;
   for (int i = 0; i < 4; i++) {                  // 4 segments 6 px high, 8..14 px wide
     int w = 8 + 2 * i;
-    g.fillRect(36 - w / 2, 132 - 9 * i, w, 6, i < bars ? col : (uint16_t)0x4208);
+    g.fillRect(40 - w / 2, 132 - 9 * i, w, 6, i < bars ? col : (uint16_t)0x4208);
   }
   char sig[12], loss[16], up_[6], dn[6];
   if (up) snprintf(sig, sizeof(sig), "%ddBm", rssi); else strcpy(sig, "--");
@@ -159,17 +169,26 @@ template <class G> static void draw_signal(G& g, const LinkState& L) {
   if (L.dnLossPct == 255) strcpy(dn, "-"); else snprintf(dn, sizeof(dn), "%u", L.dnLossPct);
   snprintf(loss, sizeof(loss), "%s/%s%%", up_, dn);
   g.setFont(&fonts::Font2);
-  g.setTextColor(col);
-  g.drawString(sig, 203, 111);
-  g.setTextColor(TFT_LIGHTGREY);
-  g.drawString(loss, 203, 129);
+  draw_halo(g, sig, 198, 111, col);              // may sit on the red TX glow
+  draw_halo(g, loss, 198, 129, TFT_LIGHTGREY);
 }
+
+// TX: solid red edge RING_TX_IN..119 fading to black down to RING_FADE_IN
+static const int RING_TX_IN = 104, RING_FADE_IN = 80;
 
 template <class G> static void draw_ring(G& g, const LinkState& L) {
   // red for the whole over (OI3 sequencer up), not blinking with every element
   bool tx = L.fresh && (L.flags & (RKEY_SF_PTT | RKEY_SF_KEY_DOWN));
-  uint16_t ring = tx ? TFT_RED : (L.fresh && L.sessionOk ? 0x03E0 /*dark green*/ : 0x4208 /*grey*/);
-  g.fillArc(120, 120, 119, tx ? 108 : 114, 0, 360, ring);
+  if (!tx) {
+    g.fillArc(120, 120, 119, 114, 0, 360, L.fresh && L.sessionOk ? 0x03E0 /*dark green*/ : 0x4208 /*grey*/);
+    return;
+  }
+  const int span = RING_TX_IN - RING_FADE_IN;
+  for (int r = RING_FADE_IN; r < RING_TX_IN; r += 2) {   // inner first, 3 px wide = no gaps
+    int k = r - RING_FADE_IN, v = 31 * k * k / (span * span);   // quadratic: dark longer
+    g.fillArc(120, 120, r + 2, r, 0, 360, (uint16_t)(v << 11));
+  }
+  g.fillArc(120, 120, 119, RING_TX_IN, 0, 360, TFT_RED);
 }
 
 // "info" function: FW revision, QR code + text of the GitHub URL, own IP
@@ -286,7 +305,7 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
              L.delayMs, L.lostEv, L.lateEv);
   else
     snprintf(s, sizeof(s), "RTT -- D%u", L.fresh ? L.delayMs : g_set.delayMs);
-  g.drawString(s, 120, 203);
+  draw_halo(g, s, 120, 203, TFT_LIGHTGREY);       // the ends touch the TX ring
   draw_signal(g, L);
 }
 
@@ -330,11 +349,11 @@ template <class G> static void draw_info(G& g, const LinkState& L) {
   g.setTextDatum(middle_center);
   g.setFont(&fonts::Font2);
   g.setTextColor(TFT_CYAN);
-  g.drawString(FW_VERSION, 120, 36);
+  g.drawString(FW_VERSION, 120, 34);
   g.setTextColor(TFT_WHITE);
   char s[64];
-  int y = 58;
-  auto line = [&](const char* t) { g.drawString(t, 120, y); y += 18; };
+  int y = 52;                                    // up to 8 lines, the last at y 164
+  auto line = [&](const char* t) { g.drawString(t, 120, y); y += 16; };
   if (wlan_ap_on()) {
     snprintf(s, sizeof(s), "AP %s", wlan_ap_name()); line(s);
     snprintf(s, sizeof(s), "http://%s", WiFi.softAPIP().toString().c_str()); line(s);
@@ -350,6 +369,13 @@ template <class G> static void draw_info(G& g, const LinkState& L) {
   snprintf(s, sizeof(s), "sessID %04X tx %lu", net_session(), (unsigned long)L.txPkts); line(s);
   snprintf(s, sizeof(s), "bad tag %lu | %c key%s", (unsigned long)L.badTag, g_set.mode, g_set.swap ? " swap" : ""); line(s);
   snprintf(s, sizeof(s), "login %s / %s", WEB_USER, g_set.webPass); line(s);
+
+  // legend of the main screen bottom line "RTT 23/18 D80 L0/0"
+  g.drawFastHLine(70, 175, 100, 0x4208);
+  g.setTextColor(0x8410);
+  g.drawString("RTT last / min ms", 120, 186);
+  g.drawString("D playout delay ms", 120, 202);
+  g.drawString("L lost / late edges", 120, 218);
 }
 
 template <class G> static void paint(G& g, const LinkState& L) {

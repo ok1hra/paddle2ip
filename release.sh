@@ -2,7 +2,7 @@
 #
 # Release Paddle2IP. Every step asks first (Enter = yes, n = skip):
 #   1. version: FW_REV in version.h from today's date (YYYYMMDD[.N])
-#   2. build:   ./build.sh -> out/
+#   2. build:   ./build.sh -> out/ (prints flash + RAM usage, again at the end)
 #   3. upload:  flash a connected Dial (choose one if there are more)
 #   4. commit:  all changes
 #   5. push:    current branch to origin
@@ -176,3 +176,5 @@ fi
 
 echo
 echo "done, FW_REV $REV"
+if [[ -f out/memory.txt ]] && bin_is_rev; then cat out/memory.txt
+else echo "memory usage unknown (out/ not built from $REV)"; fi
