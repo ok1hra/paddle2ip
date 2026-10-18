@@ -64,6 +64,7 @@ Details: [First setup](#first-setup), [Operation](#operation).
   - [Web page](#web-page)
   - [Serial console](#serial-console)
   - [Choosing the playout delay](#choosing-the-playout-delay)
+  - [Access from the internet (NAT)](#access-from-the-internet-nat)
 - [Testing without a rig](#testing-without-a-rig)
 - [Firmware structure](#firmware-structure)
 - [Implementing a server](#implementing-a-server)
@@ -332,6 +333,78 @@ raises D by itself (`L` late counter on the display). Start with:
 
 D = 0 uses the server's default (OI3 `RkeyDelayMs`). The OI3 also raises D on
 the first element of an over to cover its PTT sequencer lead times.
+
+### Access from the internet (NAT)
+
+When the server sits behind a router with a public IP address, the router
+has to forward the UDP port to it. Only one UDP port is needed, nothing else.
+
+```
+Paddle2IP ── WiFi ── any NAT ── internet ──► public IP:5690 ── router ──► OI3 192.168.1.220:5690
+          (nothing to set up here)                   (port forward UDP 5690)
+```
+
+**Paddle2IP side (operator): nothing to set up.** Paddle2IP always starts
+the communication and sends a packet at least every 100 ms, so the NAT
+mapping of the local router stays open and the STATUS replies come back
+through it. It works from a home WiFi, a hotel WiFi or a phone hotspot
+(including mobile operators with carrier-grade NAT).
+
+**Server side (rig):**
+
+1. Give the server a fixed LAN address: a DHCP reservation for its MAC
+   address in the router (recommended), or OI3 `EthernetDHCP=0`, which uses
+   the fixed address 192.168.1.220 (only if the LAN is 192.168.1.x).
+2. In the router add a port forward (DNAT, "virtual server"):
+   protocol **UDP**, external port **5690** → the server's LAN IP, port
+   **5690** (OI3 `RkeyPort`). Some routers also need a firewall rule that
+   allows this port from WAN.
+3. In Paddle2IP set *Server* to the public IP or a dynamic DNS hostname, port
+   5690. The hostname is resolved again every 60 s (every 3 s while it fails),
+   so a new address after a DDNS update is picked up without a restart.
+4. Set the playout delay D for the internet (80–150 ms, see above).
+
+The external port may differ, e.g. WAN UDP 15690 → OI3:5690; then set port
+15690 in Paddle2IP.
+
+Examples (LAN IP 192.168.1.220, WAN interface `ether1` / zone `wan`):
+
+```
+# MikroTik RouterOS
+/ip firewall nat add chain=dstnat in-interface=ether1 protocol=udp dst-port=5690 \
+    action=dst-nat to-addresses=192.168.1.220 to-ports=5690 comment=paddle2ip
+
+# OpenWrt, /etc/config/firewall
+config redirect
+	option name 'paddle2ip'
+	option target 'DNAT'
+	option src 'wan'
+	option proto 'udp'
+	option src_dport '5690'
+	option dest 'lan'
+	option dest_ip '192.168.1.220'
+	option dest_port '5690'
+```
+
+Pitfalls:
+
+- **Change the shared key** before you open the port (the OI3 default is all
+  zeros). Every packet is authenticated (SipHash) and replays are rejected,
+  so an open port is safe with a secret key.
+- **Forward only the Rkey port.** Never forward the TrxNet port (OI3
+  `UdpPort`, 5683): TrxNet has no authentication.
+- **Double NAT** (ISP modem + own router): forward the port on both, or put
+  the ISP modem in bridge mode.
+- **No public IPv4 on the rig side** (carrier-grade NAT: the WAN address of the
+  router is 100.64.x.x–100.127.x.x, or 10.x / 192.168.x, and differs from what
+  e.g. https://ifconfig.me shows): port forwarding cannot work. Ask the ISP for
+  a public IPv4 or use a VPN (e.g. WireGuard) into the rig LAN and enter the
+  server's LAN address. Paddle2IP talks IPv4 only.
+- **Testing from home with the public address** needs NAT loopback (hairpin)
+  in the router; many routers do not have it. Use the LAN IP at home, or test
+  the public address from a phone hotspot.
+- The ring stays red: check the port forward (UDP, not TCP), the server LAN
+  IP, `RkeyEnable=1` and that both sides have the same shared key.
 
 ## Testing without a rig
 
