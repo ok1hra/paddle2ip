@@ -1,0 +1,84 @@
+<!doctype html>
+<!-- Web flasher for GitHub Pages. release.sh copies this file to the gh-pages
+     branch and replaces 20261018 / 2026-10-18 10:36 UTC from 1517d54; firmware + manifest.json are generated. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paddle2IP Flasher</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --fg: #1d232b; --muted: #5b6573; --card: #ffffff;
+    --line: #dde1e6; --accent: #c0392b; --ok: #1e7d3a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161b; --fg: #e6e9ed; --muted: #9aa4b1; --card: #1b2128;
+      --line: #2c343e; --accent: #e5533f; --ok: #4cc26d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 680px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { margin: 0 0 4px; font-size: 28px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 20px; margin-bottom: 20px;
+  }
+  .rev { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 15px; }
+  .rev b { color: var(--ok); }
+  esp-web-install-button { display: inline-block; margin: 12px 0 4px; }
+  button.flash {
+    font: inherit; font-weight: 600; color: #fff; background: var(--accent);
+    border: 0; border-radius: 8px; padding: 10px 22px; cursor: pointer;
+  }
+  .warn { color: var(--accent); }
+  ol, ul { padding-left: 22px; margin: 8px 0; }
+  li { margin: 4px 0; }
+  a { color: inherit; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; }
+  footer { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Paddle2IP</h1>
+  <p class="sub">Remote CW paddle over IP &middot; M5Stack Dial (ESP32-S3)</p>
+
+  <div class="card">
+    <div class="rev">Firmware <b>20261018</b> &middot; built 2026-10-18 10:36 UTC from 1517d54</div>
+    <esp-web-install-button manifest="manifest.json">
+      <button slot="activate" class="flash">Flash firmware</button>
+      <span slot="unsupported" class="warn">This browser cannot flash: use Chrome or Edge on a desktop computer.</span>
+      <span slot="not-allowed" class="warn">Web Serial needs HTTPS or localhost.</span>
+    </esp-web-install-button>
+    <ol>
+      <li>Connect the Dial with a USB-C data cable.</li>
+      <li>Click <em>Flash firmware</em> and pick the port
+        (<code>USB JTAG/serial debug unit</code>).</li>
+      <li>When asked, do <b>not</b> erase the device if you want to keep the
+        settings (WiFi, server, shared key). Erase only for a clean start.</li>
+      <li>After flashing, press the reset button or reconnect the power.</li>
+    </ol>
+    <p>No port shows up: try another cable (many USB-C cables are charge-only)
+      and close any serial monitor that holds the port.</p>
+  </div>
+
+  <div class="card">
+    First setup, operation and the protocol are described in the
+    <a href="https://github.com/ok1hra/paddle2ip#readme">README</a>.
+    The server side runs on the
+    <a href="https://github.com/ok1hra/oi3">Open Interface III</a>.
+  </div>
+
+  <footer>
+    Source: <a href="https://github.com/ok1hra/paddle2ip">github.com/ok1hra/paddle2ip</a>
+  </footer>
+</main>
+</body>
+</html>
