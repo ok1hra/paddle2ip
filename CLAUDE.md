@@ -65,6 +65,15 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
   already needs the same WPA2 password, and captive-portal windows cannot do
   basic auth). WiFi/web passwords are prefilled (user wants show/hide);
   the shared key is write-only, a generated key is shown once.
+- Version: `FW_REV` in `version.h` = release date `YYYYMMDD[.N]`, set only
+  by `release.sh`; `FW_VERSION` = "Paddle2IP " FW_REV (release.sh greps the
+  binary for it to detect a stale out/).
+- Web flasher on gh-pages (ESP Web Tools, pinned version): 4 separate parts at
+  the arduino-cli upload offsets, NOT a merged image — NVS at 0x9000–0xDFFF
+  sits between them and must survive. Firmware in `firmware/<rev>/` so a
+  cached manifest never points at newer binaries. gh-pages is regenerated
+  from `tools/webflash/index.html` with git plumbing (temp index), never
+  edited by hand.
 - Encoder via PCNT (x4), `ENC_DIRECTION = −1` (the first hardware feedback
   said it was reversed). `ENC_COUNTS_PER_DETENT = 4` still to verify.
 
@@ -111,6 +120,8 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
 4. Moved to this repository and renamed Paddle2IP (AP `Paddle2IP-XXXX`,
    hostname `paddle2ip`, NVS namespace `paddle2ip`, default web password
    `paddle2ip`, tasks `p2ip-*`). The server stays in OI3.
+5. Info item in the display menu (FW revision + GitHub QR), `version.h`,
+   `release.sh` (bump / build / upload / commit / push / gh-pages web flasher).
 
 ## Open items
 
@@ -122,6 +133,9 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
 - OI3 `readSDSettings()` prints the cfg including `RkeyKey` to serial —
   consider masking.
 - Nothing has been pushed to GitHub; both repos only have local commits.
+  GitHub Pages has to be enabled once (release.sh offers it via `gh`).
+- Web flasher not tried on a real Dial yet (auto-reset into download mode
+  over USB-Serial-JTAG, QR readability on the round panel).
 
 ## Working with the user
 

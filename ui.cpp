@@ -2,8 +2,8 @@
 //
 // Key screen: encoder (PCNT, x4 quadrature) = 1 step of the selected function
 // per detent. Short press: next function (WPM / tone / volume / delay D /
-// iambic A-B / display rotation); the display falls back to WPM 6 s after the
-// last change.
+// iambic A-B / display rotation / info: FW revision + GitHub QR code); the
+// display falls back to WPM 6 s after the last change (info: 30 s).
 // Setup screen (AP mode): encoder selects a saved network or "best in range",
 // short press joins it; on success Paddle2IP leaves setup mode.
 // Long press (both): info page (IP, RSSI, server, counters).
@@ -18,7 +18,7 @@ void web_begin();
 void web_loop();
 bool web_take_peer_changed();
 
-enum Func : uint8_t { F_WPM, F_TONE, F_VOL, F_DELAY, F_MODE, F_ROT, F_COUNT };
+enum Func : uint8_t { F_WPM, F_TONE, F_VOL, F_DELAY, F_MODE, F_ROT, F_INFO, F_COUNT };
 static Func     func = F_WPM;
 static uint32_t funcMs = 0;
 static bool     infoPage = false;
@@ -68,6 +68,8 @@ static int enc_steps() {
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 static void apply_steps(int s) {
+  funcMs = millis();
+  if (func == F_INFO) return;                    // nothing to change
   switch (func) {
     case F_WPM:  g_set.wpm = clampi(g_set.wpm + s, WPM_MIN, WPM_MAX); break;
     case F_TONE: g_set.toneHz = clampi(g_set.toneHz + 10 * s, TONE_MIN, TONE_MAX); keyer_set_tone(g_set.toneHz); break;
@@ -83,7 +85,7 @@ static void apply_steps(int s) {
       break;
     default: break;
   }
-  dirty = true; dirtyMs = millis(); funcMs = millis();
+  dirty = true; dirtyMs = millis();
 }
 
 // setup menu: item 0 = best saved network in range, then the saved slots
@@ -163,11 +165,35 @@ template <class G> static void draw_signal(G& g, const LinkState& L, int y) {
   g.setTextDatum(middle_center);
 }
 
-template <class G> static void draw_main(G& g, const LinkState& L) {
-  g.fillScreen(TFT_BLACK);
+template <class G> static void draw_ring(G& g, const LinkState& L) {
   bool txDown = L.fresh && (L.flags & RKEY_SF_KEY_DOWN);
   uint16_t ring = txDown ? TFT_RED : (L.fresh && L.sessionOk ? 0x03E0 /*dark green*/ : 0x4208 /*grey*/);
   g.fillArc(120, 120, 119, txDown ? 108 : 114, 0, 360, ring);
+}
+
+// "info" function: FW revision, QR code + text of the GitHub URL
+template <class G> static void draw_about(G& g, const LinkState& L) {
+  g.fillScreen(TFT_BLACK);
+  draw_ring(g, L);
+  g.setTextDatum(middle_center);
+  g.setFont(&fonts::Font2);
+  g.setTextColor(TFT_LIGHTGREY);
+  g.drawString("Paddle2IP", 120, 30);
+  g.setTextColor(TFT_YELLOW);
+  g.drawString("FW " FW_REV, 120, 48);
+  g.qrcode(FW_URL, 64, 62, 111, 1, true);        // 29 modules x 3 px + 4-module quiet zone
+  const char* url = FW_URL + 8;                  // without "https://"
+  g.setTextColor(TFT_CYAN);
+  if (g.textWidth(url) > 184) g.setFont(&fonts::Font0);
+  g.drawString(url, 120, 188);
+  g.setFont(&fonts::Font2);
+  g.setTextColor(0x8410);
+  g.drawString("INFO", 120, 208);
+}
+
+template <class G> static void draw_main(G& g, const LinkState& L) {
+  g.fillScreen(TFT_BLACK);
+  draw_ring(g, L);
 
   g.setTextDatum(middle_center);
   char s[40];
@@ -303,6 +329,7 @@ template <class G> static void draw_info(G& g, const LinkState& L) {
 template <class G> static void paint(G& g, const LinkState& L) {
   if (infoPage)                 draw_info(g, L);
   else if (wlan_setup_mode())   draw_setup(g);
+  else if (func == F_INFO)      draw_about(g, L);
   else                          draw_main(g, L);
 }
 
@@ -341,7 +368,7 @@ static void ui_task(void*) {
       } else apply_steps(s);
       drawMs = 0;
     }
-    if (func != F_WPM && ms - funcMs > 6000) { func = F_WPM; drawMs = 0; }
+    if (func != F_WPM && ms - funcMs > (func == F_INFO ? 30000u : 6000u)) { func = F_WPM; drawMs = 0; }
 
     // NVS write stalls both cores -> only while the keyer has been idle for 2 s
     if (dirty && ms - dirtyMs > 3000 && keyer_idle_us((uint32_t)esp_timer_get_time()) > 2000000u) {

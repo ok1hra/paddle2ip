@@ -58,7 +58,11 @@ The Dial keeps itself powered from the battery (HOLD = GPIO46, set by `M5Dial.be
 
 ## Build and flash
 
-Arduino IDE 2.x or arduino-cli with:
+**Without building:** open the web flasher https://ok1hra.github.io/paddle2ip/
+in Chrome or Edge, connect the Dial over USB-C and click *Flash firmware*.
+Do not erase the device when asked if you want to keep the settings.
+
+To build it yourself: Arduino IDE 2.x or arduino-cli with:
 
 - board package **M5Stack** (tested with 2.1.3), board **M5Dial**
   (`m5stack:esp32:m5stack_dial`)
@@ -75,6 +79,27 @@ arduino-cli upload -b m5stack:esp32:m5stack_dial -p /dev/ttyACM0 --input-dir out
 
 `build.sh` also checks that `rkey_proto.h` is identical to the copy in an OI3
 checkout next to this one (`OI3_DIR`, default `../../oi3`).
+
+### Release
+
+`./release.sh` runs the release steps and asks before each one (Enter = yes,
+`n` = skip; `./release.sh -y` does all of them without asking):
+
+1. set `FW_REV` in `version.h` to today's date, `YYYYMMDD` (a second release
+   on the same day becomes `YYYYMMDD.2`, …)
+2. build (`build.sh`)
+3. upload to a connected Dial; with more serial devices it lists them to choose
+4. commit all changes (the message can be edited)
+5. push the current branch
+6. web flasher: generate the page (`tools/webflash/index.html`, ESP Web Tools),
+   `manifest.json` and the firmware parts, commit them to the `gh-pages`
+   branch (without touching the working tree) and push it. If GitHub Pages is
+   not enabled yet and `gh` is logged in, it offers to enable it.
+
+Steps 3 and 6 warn if `out/` was not built from the current `FW_REV`. The
+web flasher writes bootloader, partition table, `boot_app0` and the app
+separately (the same offsets as `arduino-cli upload`), so the settings in NVS
+survive unless the user chooses erase.
 
 ## First setup
 
@@ -132,6 +157,7 @@ Functions (one detent = one step; the display returns to WPM 6 s after the last 
 | Delay D | 0 (= server default) or 10–1000 ms | 10 ms |
 | Iambic | A / B | toggle |
 | Rotate | 0 / 180° | toggle |
+| Info | FW revision, QR code + text of the GitHub URL (stays 30 s) | – |
 
 Values are saved to flash 3 s after the last change, but only after the keyer
 has been idle for 2 s (a flash write stalls both CPU cores for a moment).

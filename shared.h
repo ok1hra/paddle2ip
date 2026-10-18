@@ -5,8 +5,10 @@
 //   core 0  ui task                  display, encoder, button, web config, NVS
 #pragma once
 #include <Arduino.h>
+#include "version.h"
 
-#define FW_VERSION "Paddle2IP 1.1"
+#define FW_VERSION "Paddle2IP " FW_REV
+#define FW_URL     "https://github.com/ok1hra/paddle2ip"
 
 // ---------------- pins (M5Dial v1.1) ----------------
 #define PIN_DIT    2    // Port B G2  (paddle common -> GND)
