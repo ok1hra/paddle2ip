@@ -1,15 +1,15 @@
 {
   "name": "Paddle2IP",
-  "version": "20261018.4",
+  "version": "20261018.5",
   "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32-S3",
       "parts": [
-        { "path": "firmware/20261018.4/bootloader.bin", "offset": 0 },
-        { "path": "firmware/20261018.4/partitions.bin", "offset": 32768 },
-        { "path": "firmware/20261018.4/boot_app0.bin",  "offset": 57344 },
-        { "path": "firmware/20261018.4/paddle2ip.bin",  "offset": 65536 }
+        { "path": "firmware/20261018.5/bootloader.bin", "offset": 0 },
+        { "path": "firmware/20261018.5/partitions.bin", "offset": 32768 },
+        { "path": "firmware/20261018.5/boot_app0.bin",  "offset": 57344 },
+        { "path": "firmware/20261018.5/paddle2ip.bin",  "offset": 65536 }
       ]
     }
   ]
