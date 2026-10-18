@@ -2,6 +2,7 @@
 //
 //   help              commands
 //   show              web login, AP name, IP, saved networks
+//   key               shared key as the oi3.cfg line [RkeyKey=...]
 //   resetpass         web/AP password back to the default
 //   pass <new>        set the web/AP password (8-32 chars)
 //   wifi              rescan and join the best saved network
@@ -21,6 +22,13 @@ static void show() {
   Serial.printf("server    : %s:%u  key %s\n", g_set.host[0] ? g_set.host : "-", g_set.port, g_set.keySet ? "set" : "NOT SET");
 }
 
+static void show_key() {
+  if (!g_set.keySet) { Serial.println("shared key NOT SET"); return; }
+  char hex[33];
+  settings_key_hex(hex);
+  Serial.printf("[RkeyKey=%s]\n", hex);
+}
+
 static void set_pass(const char* p) {
   size_t n = strlen(p);
   if (n < 8 || n >= sizeof(g_set.webPass)) { Serial.println("password must have 8-32 chars"); return; }
@@ -35,8 +43,9 @@ static void exec(char* s) {
   char* arg = strchr(s, ' ');
   if (arg) { *arg++ = 0; while (*arg == ' ') arg++; }
   if (!*s) return;
-  if      (!strcmp(s, "help"))      Serial.println("commands: show | resetpass | pass <new> | wifi | reboot");
+  if      (!strcmp(s, "help"))      Serial.println("commands: show | key | resetpass | pass <new> | wifi | reboot");
   else if (!strcmp(s, "show"))      show();
+  else if (!strcmp(s, "key"))       show_key();
   else if (!strcmp(s, "resetpass")) set_pass(WEB_PASS_DEFAULT);
   else if (!strcmp(s, "pass"))      set_pass(arg ? arg : "");
   else if (!strcmp(s, "wifi"))      { wlan_connect(-1); Serial.println("scanning for saved networks"); }

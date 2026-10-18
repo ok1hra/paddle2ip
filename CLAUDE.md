@@ -64,7 +64,8 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
 - Web: basic auth `admin` / webPass; clients of the own AP skip auth (the AP
   already needs the same WPA2 password, and captive-portal windows cannot do
   basic auth). WiFi/web passwords are prefilled (user wants show/hide);
-  the shared key is write-only, a generated key is shown once.
+  the shared key is prefilled too (user's choice: the page is LAN-only), and
+  the serial command `key` prints it as `[RkeyKey=...]`.
 - Version: `FW_REV` in `version.h` = release date `YYYYMMDD[.N]`, set only
   by `release.sh`; `FW_VERSION` = "Paddle2IP " FW_REV (release.sh greps the
   binary for it to detect a stale out/).
@@ -122,6 +123,8 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
    `paddle2ip`, tasks `p2ip-*`). The server stays in OI3.
 5. Info item in the display menu (FW revision + GitHub QR), `version.h`,
    `release.sh` (bump / build / upload / commit / push / gh-pages web flasher).
+6. TEST item in the display menu: turn = keyer plays "TEST" (keyer.cpp
+   `msg`, same ideal timing, paddle/straight key aborts); keyer_sim tests.
 
 ## Open items
 

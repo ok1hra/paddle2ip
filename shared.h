@@ -53,6 +53,7 @@ void settings_load();
 void settings_save();
 void settings_defaults();
 bool settings_parse_key(const char* hex, uint8_t out[16]);
+void settings_key_hex(char out[33]);      // g_set.key as 32 hex chars
 
 #define WPM_MIN 5
 #define WPM_MAX 60
@@ -74,6 +75,8 @@ void     keyer_set_tone(uint16_t hz);           // any task
 uint8_t  keyer_collect(uint32_t nowUs, uint32_t* ev, uint16_t* idx0);
 uint32_t keyer_idle_us(uint32_t nowUs);         // time since the last edge (0xFFFFFFFF = never)
 bool     keyer_key_down();
+void     keyer_send_test();                     // play "TEST" (a paddle aborts it)
+bool     keyer_msg_active();
 
 // ---------------- WiFi (wlan.cpp, ui task) ----------------
 // Saved networks are found with ONE scan of all channels; the strongest one

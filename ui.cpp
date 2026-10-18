@@ -2,8 +2,9 @@
 //
 // Key screen: encoder (PCNT, x4 quadrature) = 1 step of the selected function
 // per detent. Short press: next function (WPM / tone / volume / delay D /
-// iambic A-B / display rotation / info: FW revision + GitHub QR code); the
-// display falls back to WPM 6 s after the last change (info: 30 s).
+// iambic A-B / display rotation / test: turn = send "TEST" / info: FW revision
+// + GitHub QR code); the display falls back to WPM 6 s after the last change
+// (info: 30 s).
 // Setup screen (AP mode): encoder selects a saved network or "best in range",
 // short press joins it; on success Paddle2IP leaves setup mode.
 // Long press (both): info page (IP, RSSI, server, counters).
@@ -18,7 +19,7 @@ void web_begin();
 void web_loop();
 bool web_take_peer_changed();
 
-enum Func : uint8_t { F_WPM, F_TONE, F_VOL, F_DELAY, F_MODE, F_ROT, F_INFO, F_COUNT };
+enum Func : uint8_t { F_WPM, F_TONE, F_VOL, F_DELAY, F_MODE, F_ROT, F_SEND, F_INFO, F_COUNT };
 static Func     func = F_WPM;
 static uint32_t funcMs = 0;
 static bool     infoPage = false;
@@ -70,6 +71,7 @@ static int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v
 static void apply_steps(int s) {
   funcMs = millis();
   if (func == F_INFO) return;                    // nothing to change
+  if (func == F_SEND) { keyer_send_test(); return; }   // either direction
   switch (func) {
     case F_WPM:  g_set.wpm = clampi(g_set.wpm + s, WPM_MIN, WPM_MAX); break;
     case F_TONE: g_set.toneHz = clampi(g_set.toneHz + 10 * s, TONE_MIN, TONE_MAX); keyer_set_tone(g_set.toneHz); break;
@@ -224,11 +226,13 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
   const char* label = "WPM";
   bool num = true;
   int  val = g_set.wpm;
+  char txt[8] = "";
   switch (func) {
     case F_TONE:  label = "TONE Hz";  val = g_set.toneHz; break;
     case F_VOL:   label = "VOLUME %"; val = g_set.vol; break;
     case F_DELAY: label = g_set.delayMs ? "DELAY ms" : "DELAY (server)"; val = g_set.delayMs ? g_set.delayMs : L.delayMs; break;
-    case F_MODE:  label = "IAMBIC"; num = false; break;
+    case F_MODE:  label = "IAMBIC"; num = false; txt[0] = g_set.mode; txt[1] = 0; break;
+    case F_SEND:  label = keyer_msg_active() ? "sending..." : "turn = send"; num = false; strcpy(txt, "TEST"); break;
     case F_ROT:   label = "ROTATE (deg)"; val = g_set.rot180 ? 180 : 0; break;
     default: break;
   }
@@ -239,8 +243,8 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
     snprintf(s, sizeof(s), "%d", val);
   } else {
     g.setFont(&fonts::FreeSansBold24pt7b);
-    g.setTextSize(1.4f);
-    snprintf(s, sizeof(s), "%c", g_set.mode);
+    g.setTextSize(func == F_SEND ? 1.0f : 1.4f);
+    snprintf(s, sizeof(s), "%s", txt);
   }
   g.drawString(s, 120, 119);
   g.setTextSize(1);
@@ -368,6 +372,7 @@ static void ui_task(void*) {
       } else apply_steps(s);
       drawMs = 0;
     }
+    if (func == F_SEND && keyer_msg_active()) funcMs = ms;   // stay while sending
     if (func != F_WPM && ms - funcMs > (func == F_INFO ? 30000u : 6000u)) { func = F_WPM; drawMs = 0; }
 
     // NVS write stalls both cores -> only while the keyer has been idle for 2 s

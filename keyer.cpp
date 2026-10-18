@@ -9,6 +9,9 @@
 // first element after idle starts at the tick that saw the paddle. These ideal
 // times go into the KEY packets; the sidetone follows them within one tick.
 //
+// Test message: the UI can start "TEST", played with the same ideal timing;
+// any paddle or the straight key aborts it (the current element is finished).
+//
 // Sidetone: LEDC runs permanently at the chosen frequency; keying only switches
 // the duty between 0 and vol % (no M5.Speaker, it buffers audio).
 #include "shared.h"
@@ -92,6 +95,14 @@ static uint8_t iambicAFlag = 0;
 static bool    pDit = false, pDah = false;       // paddles sampled this tick
 const uint8_t  CMOS_SUPER_KEYER_B_TIMING_PERCENT = 33;
 
+// ---------------- test message ----------------
+static const char MSG_TEST[] = "- . ... -";      // TEST: '.' dit, '-' dah, ' ' letter gap
+static volatile bool msgReq = false;              // set by the UI task
+static const char* msg = nullptr;                 // next symbol, nullptr = no message
+
+void keyer_send_test()  { msgReq = true; }
+bool keyer_msg_active() { return msgReq || msg != nullptr; }
+
 static inline uint32_t dit_us() {
   uint8_t w = g_set.wpm;
   if (w < WPM_MIN) w = WPM_MIN;
@@ -136,18 +147,32 @@ static bool start_element(uint32_t t) {
   return true;
 }
 
+// Next message element at ideal time t; false = message done.
+static bool msg_element(uint32_t t) {
+  if (!msg || !*msg) { msg = nullptr; return false; }
+  uint8_t ty = (*msg++ == '-') ? 2 : 1;
+  curType = beingSent = ty;
+  kStart = t;
+  kEnd   = t + (ty == 1 ? 1u : 3u) * dit_us();
+  kState = K_MARK;
+  emit(t, true);
+  return true;
+}
+
 static void keyer_tick(uint32_t now) {
   bool a = gpio_get_level((gpio_num_t)PIN_DIT) == 0;
   bool b = gpio_get_level((gpio_num_t)PIN_DAH) == 0;
   pDit = g_set.swap ? b : a;
   pDah = g_set.swap ? a : b;
   bool sk = g_set.skEnable && gpio_get_level((gpio_num_t)PIN_SK) == 0;
+  if (pDit || pDah || sk) { msg = nullptr; msgReq = false; }   // the operator takes over
 
   for (uint8_t guard = 0; guard < 6; guard++) {   // a late tick may cross several phase ends
     switch (kState) {
       case K_IDLE:
         if (sk) { kState = K_STRAIGHT; emit(now, true); return; }
-        start_element(now);
+        if (start_element(now)) return;
+        if (msgReq) { msgReq = false; msg = MSG_TEST; msg_element(now); }
         return;
 
       case K_STRAIGHT:                            // measured times; the paddle waits
@@ -159,6 +184,7 @@ static void keyer_tick(uint32_t now) {
         emit(kEnd, false);
         kStart = kEnd;
         kEnd   = kStart + dit_us();               // inter-element gap
+        if (msg && *msg == ' ') { msg++; kEnd += 2 * dit_us(); }   // letter gap
         kState = K_GAP;
         break;
 
@@ -171,7 +197,7 @@ static void keyer_tick(uint32_t now) {
         if (g_set.mode == 'A' && iambicAFlag && !pDit && !pDah) {
           iambicAFlag = 0; ditBuf = 0; dahBuf = 0;
         }
-        if (!start_element(kEnd)) { kState = K_IDLE; return; }
+        if (!(msg ? msg_element(kEnd) : start_element(kEnd))) { kState = K_IDLE; return; }
         break;
     }
   }

@@ -6,9 +6,9 @@
 // In AP mode every unknown URL redirects to the page (captive portal), so a
 // phone opens it by itself after joining the AP.
 //
-// WiFi and web passwords are filled into the form (hidden, an eye button shows
-// them). The shared key stays write-only, except a freshly generated key,
-// shown once so it can be copied into oi3.cfg ([RkeyKey=...]).
+// WiFi and web passwords and the shared key are filled into the form (hidden,
+// an eye button shows them), so the key can be copied into oi3.cfg later.
+// Plain HTTP: the key crosses the local network on every page load (accepted).
 #include "shared.h"
 #include <WiFi.h>
 #include <WebServer.h>
@@ -136,7 +136,9 @@ static void handle_root() {
   h += F("<label>Shared key (RkeyKey): <b>");
   h += g_set.keySet ? F("set") : F("NOT SET");
   h += F("</b></label>");
-  pwfield(h, "", "key", "", "placeholder='32 hex chars, empty = keep'");
+  char hex[33] = "";
+  if (g_set.keySet) settings_key_hex(hex);
+  pwfield(h, "", "key", hex, "maxlength=32 placeholder='32 hex chars, empty = keep'");
   field(h, "Playout delay D ms (0 = server default, OI3 RkeyDelayMs; LAN 30, internet 80-150, LTE 200+)", "delay",
         String(g_set.delayMs), "number", "min=0 max=1000");
   h += F("</fieldset><fieldset><legend>Keyer</legend>");
@@ -255,10 +257,11 @@ static void handle_genkey() {
   g_set.keySet = true;
   settings_save();
   char hex[33];
-  for (int i = 0; i < 16; i++) sprintf(hex + 2 * i, "%02x", k[i]);
+  settings_key_hex(hex);
   String h = FPSTR(HEAD);
   h += F("<p>New key stored in Paddle2IP. Put this line into <b>oi3.cfg</b> on the OI3 SD card "
-         "(it is shown only now):</p><p><code>[RkeyKey="); h += hex; h += F("]");
+         "(the key stays visible on the setup page and via the serial command <code>key</code>):</p>"
+         "<p><code>[RkeyKey="); h += hex; h += F("]");
   h += F("</code></p><p><a href=/>Back</a></p></body></html>");
   server.send(200, "text/html", h);
 }

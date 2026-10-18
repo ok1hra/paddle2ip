@@ -44,6 +44,10 @@ bool settings_parse_key(const char* hex, uint8_t out[16]) {
   return true;
 }
 
+void settings_key_hex(char out[33]) {
+  for (int i = 0; i < 16; i++) sprintf(out + 2 * i, "%02x", g_set.key[i]);
+}
+
 static uint32_t clampu(uint32_t v, uint32_t lo, uint32_t hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 void settings_load() {

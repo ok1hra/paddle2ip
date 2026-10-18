@@ -24,8 +24,29 @@ paddle ─► Paddle2IP: iambic keyer ─► sidetone (buzzer / headphones, 0 ms
 > Status: the firmware builds and its keyer, protocol and test tools are
 > verified on a PC; it has **not been tested on hardware yet**.
 
+## Quick start
+
+1. **Paddle**: dit to Port B **G2**, dah to **G1**, common to **GND**
+   (do not connect the red 5 V wire). See [Hardware](#hardware).
+2. **Flash**: open the web flasher **https://ok1hra.github.io/paddle2ip/** in
+   Chrome or Edge, connect the Dial with a USB-C data cable and click
+   *Flash firmware*.
+3. **Setup**: after the first start the display shows **SETUP**. Join the WiFi
+   `Paddle2IP-XXXX` (password `paddle2ip`) with a phone; the setup page opens
+   by itself (otherwise http://192.168.4.1). Enter your WiFi, the server
+   address (port 5690) and the shared key — *Generate new key* shows a
+   `[RkeyKey=...]` line for the server. *Save*.
+4. **Server** (OI3): put `[RkeyEnable=1]` and the same `[RkeyKey=...]` in
+   `oi3.cfg` on the SD card and restart it.
+5. **Key**: the ring turns green when the server answers. Turn the knob for
+   WPM, a short press selects the next function (tone, volume, delay, iambic
+   A/B, rotation, info), a long press shows the info page.
+
+Details: [First setup](#first-setup), [Operation](#operation).
+
 ## Contents
 
+- [Quick start](#quick-start)
 - [Hardware](#hardware)
 - [Build and flash](#build-and-flash)
 - [First setup](#first-setup)
@@ -113,7 +134,8 @@ survive unless the user chooses erase.
 4. Server: the OI3 IP address or hostname and UDP port (OI3 `RkeyPort`, default 5690).
 5. Shared key: either paste the 32-hex-char key from the server, or press
    *Generate new key* and copy the shown `[RkeyKey=...]` line into `oi3.cfg`
-   on the OI3 SD card. The key is shown only this once.
+   on the OI3 SD card. The key can be shown again later on the page (eye
+   button) or with the serial command `key`.
 6. On the OI3 set `[RkeyEnable=1]` and the same `RkeyKey`, restart it.
 7. *Save*. Paddle2IP reboots, joins the strongest saved network and connects.
    The ring turns green when the server answers.
@@ -157,6 +179,7 @@ Functions (one detent = one step; the display returns to WPM 6 s after the last 
 | Delay D | 0 (= server default) or 10–1000 ms | 10 ms |
 | Iambic | A / B | toggle |
 | Rotate | 0 / 180° | toggle |
+| Test | turn = send `TEST` at the set WPM (keys the rig like the paddle; a paddle aborts it) | – |
 | Info | FW revision, QR code + text of the GitHub URL (stays 30 s) | – |
 
 Values are saved to flash 3 s after the last change, but only after the keyer
@@ -190,15 +213,16 @@ network again. Scans never run while connected unless the web page asks
 because joining the AP already took the same password.
 
 - WiFi networks: list of networks in range (*Scan*), three SSID/password slots.
-- Server: IP or hostname, port, shared key (write-only), playout delay D.
+- Server: IP or hostname, port, shared key, playout delay D.
 - Keyer: WPM, tone, volume, iambic A/B, paddle swap, straight key on G13,
   headphone tone on G15, display rotation.
 - Login: the web/AP password.
-- *Generate new key*: stores a random key and shows it once for `oi3.cfg`.
+- *Generate new key*: stores a random key and shows the `[RkeyKey=...]` line for `oi3.cfg`.
 - `/status`: link state as JSON.
 
-Every password field has a show/hide button. WiFi and web passwords are filled
-in; the shared key is never sent back to the browser.
+Every password field has a show/hide button. WiFi and web passwords and the
+shared key are filled in, so the key can be copied later. The page is plain
+HTTP: keep it on the local network (the key travels with every page load).
 
 ### Serial console
 
@@ -207,6 +231,7 @@ USB, 115200 baud. Use it when the login is lost.
 | Command | |
 |---|---|
 | `show` | web login and password, AP name, IP addresses, saved networks, server |
+| `key` | shared key as the `oi3.cfg` line `[RkeyKey=...]` |
 | `resetpass` | web/AP password back to `paddle2ip` |
 | `pass <new>` | set the web/AP password (8–32 chars) |
 | `wifi` | rescan and join the best saved network |
