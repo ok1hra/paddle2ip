@@ -37,6 +37,20 @@ static std::string run(char mode, const std::vector<P>& ps, int endms, int testA
   return out;
 }
 
+static std::string trace_run(const std::vector<P>& ps, int endms, int testAt) {
+  run('B', {}, 0);                                 // reset the keyer state
+  keyer_trace_clear();
+  size_t k = 0;
+  for (int ms = 0; ms < endms; ms++) {
+    while (k < ps.size() && ps[k].ms <= ms) { g_pin[PIN_DIT] = !ps[k].dit; g_pin[PIN_DAH] = !ps[k].dah; k++; }
+    if (ms == testAt) keyer_send_test();
+    keyer_tick(1000000u + ms * 1000u + 137);
+  }
+  char tr[64];
+  keyer_trace(tr, 60);
+  return tr;
+}
+
 int main() {
   struct T { const char* name; char mode; std::vector<P> ps; int end; const char* want; int testAt; } tests[] = {   // testAt: ms of keyer_send_test(), 0 = none
     { "hold dit",                     'B', {{0,1,0},{400,0,0}}, 1000, "M1.00 s1.00 M1.00 s1.00 M1.00 s1.00 M1.00" },
@@ -58,6 +72,17 @@ int main() {
     bool ok = got == t.want;
     fails += !ok;
     printf("%s  %-30s %s%s%s\n", ok ? "PASS" : "FAIL", t.name, got.c_str(), ok ? "" : "  want: ", ok ? "" : t.want);
+  }
+  // element trace (display MONITOR) on one continuous timeline
+  struct TT { const char* name; std::vector<P> ps; int end; int testAt; const char* want; } traces[] = {
+    { "trace: TEST, word gap, dah",  {{1700,0,1},{1730,0,0}}, 2500, 1, "- . ... - / -" },
+    { "trace: squeeze, letter gap",  {{0,1,1},{100,0,0},{500,1,0},{530,0,0}}, 1000, -1, "-. ." },
+  };
+  for (auto& t : traces) {
+    std::string got = trace_run(t.ps, t.end, t.testAt);
+    bool ok = got == t.want;
+    fails += !ok;
+    printf("%s  %-30s '%s'%s%s\n", ok ? "PASS" : "FAIL", t.name, got.c_str(), ok ? "" : "  want: ", ok ? "" : t.want);
   }
   printf(fails ? "%d FAILED\n" : "all passed\n", fails);
   return fails ? 1 : 0;

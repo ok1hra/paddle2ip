@@ -12,6 +12,11 @@
 // Test message: the UI can start "TEST", played with the same ideal timing;
 // any paddle or the straight key aborts it (the current element is finished).
 //
+// Element trace (display "MONITOR"): every key-up appends '.' or '-' by the
+// mark length (< 2 dits = dot), every key-down after a gap of >= 2 dits a ' '
+// (letter) or after >= 5 dits " / " (word). Same edges as in the KEY packets,
+// so it works for the paddle, the test message and the straight key.
+//
 // Sidetone: LEDC runs permanently at the chosen frequency; keying only switches
 // the duty between 0 and vol % (no M5.Speaker, it buffers audio).
 #include "shared.h"
@@ -39,10 +44,53 @@ static void sidetone(bool on) {
   if (g_set.hpEnable) ledcWrite(LEDC_CH_HP, duty);
 }
 
+// ---------------- element trace (keyer -> display) ----------------
+#define TRACE_LEN 48
+static char     trace[TRACE_LEN + 1];            // guarded by edgeMux
+static uint8_t  traceN = 0;
+static uint32_t traceDownUs = 0;
+
+static inline uint32_t dit_us();
+
+static void trace_put(char c) {                  // edgeMux held
+  if (traceN == TRACE_LEN) { memmove(trace, trace + 1, TRACE_LEN - 1); traceN--; }
+  trace[traceN++] = c;
+}
+
+static void trace_edge(uint32_t t, bool down) {  // edgeMux held
+  uint32_t dit = dit_us();
+  if (down) {
+    uint32_t gap = t - lastEdgeUs;               // lastEdgeUs = previous key-up
+    if (traceN && edgeCount) {
+      if (gap >= 5 * dit)      { trace_put(' '); trace_put('/'); trace_put(' '); }
+      else if (gap >= 2 * dit) trace_put(' ');
+    }
+    traceDownUs = t;
+  } else {
+    trace_put((t - traceDownUs) < 2 * dit ? '.' : '-');
+  }
+}
+
+uint8_t keyer_trace(char* out, uint8_t max) {
+  portENTER_CRITICAL(&edgeMux);
+  uint8_t n = traceN < max ? traceN : max;
+  memcpy(out, trace + traceN - n, n);
+  portEXIT_CRITICAL(&edgeMux);
+  out[n] = 0;
+  return n;
+}
+
+void keyer_trace_clear() {
+  portENTER_CRITICAL(&edgeMux);
+  traceN = 0;
+  portEXIT_CRITICAL(&edgeMux);
+}
+
 static void emit(uint32_t t, bool down) {
   sidetone(down);
   uint32_t ev = (t & ~1u) | (down ? 1u : 0u);
   portENTER_CRITICAL(&edgeMux);
+  trace_edge(t, down);
   ring[nextIdx & (EDGE_RING - 1)] = ev;
   nextIdx++;
   edgeCount++;

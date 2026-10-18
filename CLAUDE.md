@@ -125,6 +125,12 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
    `release.sh` (bump / build / upload / commit / push / gh-pages web flasher).
 6. TEST item in the display menu: turn = keyer plays "TEST" (keyer.cpp
    `msg`, same ideal timing, paddle/straight key aborts); keyer_sim tests.
+7. MONITOR item: CONN/DISC (fresh STATUS for our session, nonce ok) and a
+   trace of the elements built from the same edges as the KEY packets
+   (keyer.cpp `trace_edge`: mark < 2 dits = '.', gap >= 2 dits ' ',
+   >= 5 dits " / "). It shows what was SENT, not what the server keyed: the
+   protocol has no echo of played edges (that would need a STATUS extension
+   in both repos).
 
 ## Open items
 

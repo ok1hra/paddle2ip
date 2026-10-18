@@ -40,7 +40,7 @@ paddle ─► Paddle2IP: iambic keyer ─► sidetone (buzzer / headphones, 0 ms
    `oi3.cfg` on the SD card and restart it.
 5. **Key**: the ring turns green when the server answers. Turn the knob for
    WPM, a short press selects the next function (tone, volume, delay, iambic
-   A/B, rotation, info), a long press shows the info page.
+   A/B, rotation, test, monitor, info), a long press shows the info page.
 
 Details: [First setup](#first-setup), [Operation](#operation).
 
@@ -146,13 +146,13 @@ survive unless the user chooses erase.
 
 | Area | Content |
 |---|---|
-| top | own IP address (`AP 192.168.4.1` when only the AP runs) |
-| below | rig frequency and mode, sequencer level (from the server) |
+| top | rig frequency `14 023.75` (from the server); the sequencer level n colours the last n digits red (0 = none) |
 | centre | big value of the selected encoder function (normally WPM) |
+| left of centre | WiFi signal, vertical bargraph (bottom segment = weakest) |
+| right of centre | WiFi signal in dBm, below it uplink/downlink packet loss in % |
 | warning line | NO KEY, NO WIFI, NO SERVER, NO LINK, SYNC (stale nonce), INTERLOCK, TUNE, TRX NOT CW, MUTED |
-| bottom 1 | `RTT last/min ms`, playout delay D in use, server `L lost/late` edge counters |
-| bottom 2 | WiFi signal (bars + dBm), uplink/downlink packet loss in % |
-| ring | **red** = the server has the key down, green = live link, grey = no link |
+| bottom | `RTT last/min ms`, playout delay D in use, server `L lost/late` edge counters |
+| ring | **red** = TX on the server (PTT sequencer up, the whole over, not each element), green = live link, grey = no link |
 
 WiFi signal colour: green ≥ −65 dBm, orange −65 … −75 dBm (at the edge), red
 below −75 dBm (drop-outs likely). Thresholds: `RSSI_GOOD` / `RSSI_EDGE` in `shared.h`.
@@ -169,7 +169,7 @@ character is never transmitted. Just continue with the next word.
 | short press | next function | join the selected network |
 | long press | info page (IP, RSSI, server, session, counters, login) | info page |
 
-Functions (one detent = one step; the display returns to WPM 6 s after the last change):
+Functions (one detent = one step; the display returns to WPM 20 s after the last change):
 
 | Function | Range | Step |
 |---|---|---|
@@ -180,7 +180,8 @@ Functions (one detent = one step; the display returns to WPM 6 s after the last 
 | Iambic | A / B | toggle |
 | Rotate | 0 / 180° | toggle |
 | Test | turn = send `TEST` at the set WPM (keys the rig like the paddle; a paddle aborts it) | – |
-| Info | FW revision, QR code + text of the GitHub URL (stays 30 s) | – |
+| Monitor | line 1 `CONN` (green, server answers our session) / `DISC` (red); line 2 the sent elements, e.g. `-.-. --.- / -.-`, newest on the right; turn = clear (stays until the next press) | – |
+| Info | FW revision, QR code + text of the GitHub URL, own IP address (`AP 192.168.4.1` when only the AP runs) (stays 60 s) | – |
 
 Values are saved to flash 3 s after the last change, but only after the keyer
 has been idle for 2 s (a flash write stalls both CPU cores for a moment).
@@ -454,6 +455,13 @@ Release the key immediately, drop queued edges and **mute** when:
 - keying stops being allowed: wrong mode (not CW/CW-R), interlock, tune,
   network down, server disabled;
 - the PTT sequencer does not become ready in time (OI3: 3 s).
+
+Enforce link timeout and max key-down **independently of the main loop**
+(OI3: in the Timer1 ISR, every 50 ms while the key is down, and no mark is
+started on a link that has already timed out). Anything that can block the
+main loop — DHCP renew, flash writes, slow serial or display I/O — must never
+be able to leave the transmitter keyed; defer such work while remote keying is
+active.
 
 Muted means: nothing is keyed until the client is idle (`nev = 0`) or its
 newest edge is a key-up older than 5 dits (word gap). Never resume inside a

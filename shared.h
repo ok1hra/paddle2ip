@@ -77,6 +77,9 @@ uint32_t keyer_idle_us(uint32_t nowUs);         // time since the last edge (0xF
 bool     keyer_key_down();
 void     keyer_send_test();                     // play "TEST" (a paddle aborts it)
 bool     keyer_msg_active();
+// Last max chars of the element trace ("-.-. --.- / ..."), out needs max + 1 B.
+uint8_t  keyer_trace(char* out, uint8_t max);
+void     keyer_trace_clear();
 
 // ---------------- WiFi (wlan.cpp, ui task) ----------------
 // Saved networks are found with ONE scan of all channels; the strongest one

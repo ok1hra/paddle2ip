@@ -2,9 +2,10 @@
 //
 // Key screen: encoder (PCNT, x4 quadrature) = 1 step of the selected function
 // per detent. Short press: next function (WPM / tone / volume / delay D /
-// iambic A-B / display rotation / test: turn = send "TEST" / info: FW revision
-// + GitHub QR code); the display falls back to WPM 6 s after the last change
-// (info: 30 s).
+// iambic A-B / display rotation / test: turn = send "TEST" / monitor: link
+// CONN/DISC + trace of the sent elements, turn = clear / info: FW revision,
+// GitHub QR code + own IP); the display falls back to WPM FUNC_HOLD_MS after
+// the last change (info: INFO_HOLD_MS, monitor: stays).
 // Setup screen (AP mode): encoder selects a saved network or "best in range",
 // short press joins it; on success Paddle2IP leaves setup mode.
 // Long press (both): info page (IP, RSSI, server, counters).
@@ -19,13 +20,15 @@ void web_begin();
 void web_loop();
 bool web_take_peer_changed();
 
-enum Func : uint8_t { F_WPM, F_TONE, F_VOL, F_DELAY, F_MODE, F_ROT, F_SEND, F_INFO, F_COUNT };
+enum Func : uint8_t { F_WPM, F_TONE, F_VOL, F_DELAY, F_MODE, F_ROT, F_SEND, F_MON, F_INFO, F_COUNT };
 static Func     func = F_WPM;
 static uint32_t funcMs = 0;
 static bool     infoPage = false;
 static bool     dirty = false;
 static uint32_t dirtyMs = 0;
 static int8_t   menuSel = 0;                     // setup menu: 0 = best in range, 1.. = saved slots
+static const uint32_t FUNC_HOLD_MS = 20000;      // back to WPM after the last change
+static const uint32_t INFO_HOLD_MS = 60000;
 
 static M5Canvas canvas(&M5Dial.Display);
 static bool     haveCanvas = false;
@@ -72,6 +75,7 @@ static void apply_steps(int s) {
   funcMs = millis();
   if (func == F_INFO) return;                    // nothing to change
   if (func == F_SEND) { keyer_send_test(); return; }   // either direction
+  if (func == F_MON)  { keyer_trace_clear(); return; }
   switch (func) {
     case F_WPM:  g_set.wpm = clampi(g_set.wpm + s, WPM_MIN, WPM_MAX); break;
     case F_TONE: g_set.toneHz = clampi(g_set.toneHz + 10 * s, TONE_MIN, TONE_MAX); keyer_set_tone(g_set.toneHz); break;
@@ -115,15 +119,6 @@ static void peer_service(bool force) {
 }
 
 // ---------------- display ----------------
-static const char* mode_name(uint8_t m) {
-  switch (m) {
-    case 0x00: return "LSB";  case 0x01: return "USB"; case 0x02: return "AM";
-    case 0x03: return "CW";   case 0x04: return "RTTY"; case 0x05: return "FM";
-    case 0x07: return "CW-R"; case 0x08: return "RTTY-R"; case 0x17: return "DV";
-    default:   return "?";
-  }
-}
-
 static const char* warning(const LinkState& L, uint16_t* col) {
   *col = TFT_RED;
   if (!g_set.keySet)            return "NO KEY";
@@ -138,42 +133,46 @@ static const char* warning(const LinkState& L, uint16_t* col) {
   return nullptr;
 }
 
-// WiFi bars + dBm (green / orange = at the edge / red = drop-outs likely),
-// then packet loss up/down, centred on line y.
-template <class G> static void draw_signal(G& g, const LinkState& L, int y) {
+// centre value: scale up to maxSize, but leave room for the signal on both sides
+template <class G> static void fit_size(G& g, const char* t, float maxSize) {
+  g.setTextSize(1);
+  int w = g.textWidth(t);
+  g.setTextSize(w > 0 && 110.0f / w < maxSize ? 110.0f / w : maxSize);
+}
+
+// WiFi signal beside the centre value: vertical bargraph on the left (bottom =
+// weakest), dBm above the packet loss up/down on the right. Green / orange =
+// at the edge / red = drop-outs likely.
+template <class G> static void draw_signal(G& g, const LinkState& L) {
   bool up = WiFi.isConnected();
   int rssi = up ? WiFi.RSSI() : -127;
   uint16_t col = !up ? (uint16_t)0x8410 : rssi >= RSSI_GOOD ? (uint16_t)TFT_GREEN
                : rssi >= RSSI_EDGE ? (uint16_t)TFT_ORANGE : (uint16_t)TFT_RED;
   int bars = !up ? 0 : rssi >= -55 ? 4 : rssi >= RSSI_GOOD ? 3 : rssi >= RSSI_EDGE ? 2 : 1;
+  for (int i = 0; i < 4; i++) {                  // 4 segments 6 px high, 8..14 px wide
+    int w = 8 + 2 * i;
+    g.fillRect(36 - w / 2, 132 - 9 * i, w, 6, i < bars ? col : (uint16_t)0x4208);
+  }
   char sig[12], loss[16], up_[6], dn[6];
   if (up) snprintf(sig, sizeof(sig), "%ddBm", rssi); else strcpy(sig, "--");
   if (L.upLossPct == 255) strcpy(up_, "-"); else snprintf(up_, sizeof(up_), "%u", L.upLossPct);
   if (L.dnLossPct == 255) strcpy(dn, "-"); else snprintf(dn, sizeof(dn), "%u", L.dnLossPct);
   snprintf(loss, sizeof(loss), "%s/%s%%", up_, dn);
   g.setFont(&fonts::Font2);
-  const int bw = 15, gap = 4, gap2 = 8;
-  int wSig = g.textWidth(sig), wLoss = g.textWidth(loss);
-  int x = 120 - (bw + gap + wSig + gap2 + wLoss) / 2;
-  for (int i = 0; i < 4; i++) {                  // 4 bars, 3 px wide, 3..12 px high
-    int h = 3 * (i + 1);
-    g.fillRect(x + 4 * i, y + 6 - h, 3, h, i < bars ? col : (uint16_t)0x4208);
-  }
-  g.setTextDatum(middle_left);
   g.setTextColor(col);
-  g.drawString(sig, x + bw + gap, y);
+  g.drawString(sig, 203, 111);
   g.setTextColor(TFT_LIGHTGREY);
-  g.drawString(loss, x + bw + gap + wSig + gap2, y);
-  g.setTextDatum(middle_center);
+  g.drawString(loss, 203, 129);
 }
 
 template <class G> static void draw_ring(G& g, const LinkState& L) {
-  bool txDown = L.fresh && (L.flags & RKEY_SF_KEY_DOWN);
-  uint16_t ring = txDown ? TFT_RED : (L.fresh && L.sessionOk ? 0x03E0 /*dark green*/ : 0x4208 /*grey*/);
-  g.fillArc(120, 120, 119, txDown ? 108 : 114, 0, 360, ring);
+  // red for the whole over (OI3 sequencer up), not blinking with every element
+  bool tx = L.fresh && (L.flags & (RKEY_SF_PTT | RKEY_SF_KEY_DOWN));
+  uint16_t ring = tx ? TFT_RED : (L.fresh && L.sessionOk ? 0x03E0 /*dark green*/ : 0x4208 /*grey*/);
+  g.fillArc(120, 120, 119, tx ? 108 : 114, 0, 360, ring);
 }
 
-// "info" function: FW revision, QR code + text of the GitHub URL
+// "info" function: FW revision, QR code + text of the GitHub URL, own IP
 template <class G> static void draw_about(G& g, const LinkState& L) {
   g.fillScreen(TFT_BLACK);
   draw_ring(g, L);
@@ -188,9 +187,13 @@ template <class G> static void draw_about(G& g, const LinkState& L) {
   g.setTextColor(TFT_CYAN);
   if (g.textWidth(url) > 184) g.setFont(&fonts::Font0);
   g.drawString(url, 120, 188);
+  // own IP address (the only line that fits below the URL)
+  char s[24];
   g.setFont(&fonts::Font2);
-  g.setTextColor(0x8410);
-  g.drawString("INFO", 120, 208);
+  g.setTextColor(TFT_CYAN);
+  if (WiFi.isConnected())  g.drawString(WiFi.localIP().toString().c_str(), 120, 208);
+  else if (wlan_ap_on())   { snprintf(s, sizeof(s), "AP %s", WiFi.softAPIP().toString().c_str()); g.drawString(s, 120, 208); }
+  else                     { g.setTextColor(0x8410); g.drawString("no IP", 120, 208); }
 }
 
 template <class G> static void draw_main(G& g, const LinkState& L) {
@@ -199,27 +202,27 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
 
   g.setTextDatum(middle_center);
   char s[40];
-  // own IP address (on top of the ring)
-  g.setFont(&fonts::Font2);
-  g.setTextColor(TFT_CYAN);
-  if (WiFi.isConnected())  g.drawString(WiFi.localIP().toString().c_str(), 120, 25);
-  else if (wlan_ap_on())   { snprintf(s, sizeof(s), "AP %s", WiFi.softAPIP().toString().c_str()); g.drawString(s, 120, 25); }
-  else                     { g.setTextColor(0x8410); g.drawString("no IP", 120, 25); }
-
-  // rig frequency + mode
-  g.setTextColor(TFT_WHITE);
+  // rig frequency "14 023.75"; sequencer level n colours the last n digits
   g.setFont(&fonts::Font4);
   if (L.fresh && (L.flags & RKEY_SF_CIV_VALID) && L.freqHz) {
-    snprintf(s, sizeof(s), "%lu.%03lu.%02lu", (unsigned long)(L.freqHz / 1000000UL),
+    snprintf(s, sizeof(s), "%lu %03lu.%02lu", (unsigned long)(L.freqHz / 1000000UL),
              (unsigned long)((L.freqHz / 1000UL) % 1000UL), (unsigned long)((L.freqHz % 1000UL) / 10UL));
-    g.drawString(s, 120, 47);
-    g.setFont(&fonts::Font2);
-    g.setTextColor((L.flags & RKEY_SF_CW_MODE) ? TFT_GREEN : TFT_ORANGE);
-    snprintf(s, sizeof(s), "%s  SEQ %u", mode_name(L.civMode), L.seqLevel);
-    g.drawString(s, 120, 69);
+    int x = 120 - g.textWidth(s) / 2;
+    int left = 0;                                // digits still to come, incl. this one
+    for (const char* p = s; *p; p++) if (*p != ' ' && *p != '.') left++;
+    g.setTextDatum(middle_left);
+    for (const char* p = s; *p; p++) {
+      char c[2] = { *p, 0 };
+      bool digit = (*p != ' ' && *p != '.');
+      g.setTextColor(digit && left <= L.seqLevel ? TFT_RED : TFT_WHITE);
+      if (digit) left--;
+      g.drawString(c, x, 50);
+      x += g.textWidth(c);
+    }
+    g.setTextDatum(middle_center);
   } else {
     g.setTextColor(0x8410);
-    g.drawString("---.---.--", 120, 47);
+    g.drawString("-- ---.--", 120, 50);
   }
 
   // centre: big value of the selected function
@@ -234,22 +237,41 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
     case F_MODE:  label = "IAMBIC"; num = false; txt[0] = g_set.mode; txt[1] = 0; break;
     case F_SEND:  label = keyer_msg_active() ? "sending..." : "turn = send"; num = false; strcpy(txt, "TEST"); break;
     case F_ROT:   label = "ROTATE (deg)"; val = g_set.rot180 ? 180 : 0; break;
+    case F_MON:   num = false; break;
     default: break;
   }
   g.setTextColor(func == F_WPM ? TFT_WHITE : TFT_YELLOW);
   if (num) {
     g.setFont(&fonts::Font7);
-    g.setTextSize(func == F_TONE || func == F_DELAY || func == F_ROT ? 1.2f : 1.45f);
     snprintf(s, sizeof(s), "%d", val);
+    fit_size(g, s, 1.45f);
   } else {
     g.setFont(&fonts::FreeSansBold24pt7b);
-    g.setTextSize(func == F_SEND ? 1.0f : 1.4f);
     snprintf(s, sizeof(s), "%s", txt);
+    fit_size(g, s, 1.4f);
   }
-  g.drawString(s, 120, 119);
+  if (func == F_MON) {
+    // line 1: link state, line 2: trace of the sent elements (newest right)
+    bool conn = L.fresh && L.sessionOk && !(L.flags & RKEY_SF_NONCE_BAD);
+    g.setFont(&fonts::FreeSansBold24pt7b);
+    fit_size(g, conn ? "CONN" : "DISC", 1.2f);
+    g.setTextColor(conn ? TFT_GREEN : TFT_RED);
+    g.drawString(conn ? "CONN" : "DISC", 120, 112);
+    g.setTextSize(1);
+    g.setFont(&fonts::FreeMonoBold12pt7b);
+    g.setTextColor(TFT_WHITE);
+    char tr[24];
+    keyer_trace(tr, 14);                         // 14 x 14 px fits the round panel here
+    g.setTextDatum(middle_right);
+    g.drawString(tr, 218, 155);
+    g.setTextDatum(middle_center);
+  } else {
+    g.drawString(s, 120, 119);
+    g.setTextSize(1);
+    g.setFont(&fonts::Font2);
+    g.drawString(label, 120, 162);
+  }
   g.setTextSize(1);
-  g.setFont(&fonts::Font2);
-  g.drawString(label, 120, 162);
 
   // warning line
   uint16_t wc;
@@ -265,7 +287,7 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
   else
     snprintf(s, sizeof(s), "RTT -- D%u", L.fresh ? L.delayMs : g_set.delayMs);
   g.drawString(s, 120, 203);
-  draw_signal(g, L, 220);
+  draw_signal(g, L);
 }
 
 template <class G> static void draw_setup(G& g) {
@@ -325,8 +347,8 @@ template <class G> static void draw_info(G& g, const LinkState& L) {
     snprintf(s, sizeof(s), "http://%s", WiFi.localIP().toString().c_str()); line(s);
   } else { snprintf(s, sizeof(s), "STA %.22s", wlan_status()); line(s); }
   snprintf(s, sizeof(s), "SRV %.24s:%u", g_set.host[0] ? g_set.host : "-", g_set.port); line(s);
-  snprintf(s, sizeof(s), "sess %04X tx %lu", net_session(), (unsigned long)L.txPkts); line(s);
-  snprintf(s, sizeof(s), "bad tag %lu  %c %s", (unsigned long)L.badTag, g_set.mode, g_set.swap ? "swap" : ""); line(s);
+  snprintf(s, sizeof(s), "sessID %04X tx %lu", net_session(), (unsigned long)L.txPkts); line(s);
+  snprintf(s, sizeof(s), "bad tag %lu | %c key%s", (unsigned long)L.badTag, g_set.mode, g_set.swap ? " swap" : ""); line(s);
   snprintf(s, sizeof(s), "login %s / %s", WEB_USER, g_set.webPass); line(s);
 }
 
@@ -373,7 +395,7 @@ static void ui_task(void*) {
       drawMs = 0;
     }
     if (func == F_SEND && keyer_msg_active()) funcMs = ms;   // stay while sending
-    if (func != F_WPM && ms - funcMs > (func == F_INFO ? 30000u : 6000u)) { func = F_WPM; drawMs = 0; }
+    if (func != F_WPM && func != F_MON && ms - funcMs > (func == F_INFO ? INFO_HOLD_MS : FUNC_HOLD_MS)) { func = F_WPM; drawMs = 0; }
 
     // NVS write stalls both cores -> only while the keyer has been idle for 2 s
     if (dirty && ms - dirtyMs > 3000 && keyer_idle_us((uint32_t)esp_timer_get_time()) > 2000000u) {
