@@ -80,7 +80,11 @@ static void apply_steps(int s) {
   switch (func) {
     case F_WPM:  g_set.wpm = clampi(g_set.wpm + s, WPM_MIN, WPM_MAX); break;
     case F_TONE: g_set.toneHz = clampi(g_set.toneHz + 10 * s, TONE_MIN, TONE_MAX); keyer_set_tone(g_set.toneHz); break;
-    case F_VOL:  g_set.vol = clampi(g_set.vol + s, VOL_MIN, VOL_MAX); break;
+    case F_VOL: {                                 // steps of 5 %, an odd value snaps to the grid
+      int v = (s > 0 ? g_set.vol / 5 : (g_set.vol + 4) / 5) * 5 + 5 * s;
+      g_set.vol = clampi(v, VOL_MIN, VOL_MAX);
+      break;
+    }
     case F_DELAY: {                               // 0 = OI3 default, else 10..1000 ms
       int d = g_set.delayMs + 10 * s;
       g_set.delayMs = (d < 10) ? 0 : clampi(d, 10, DELAY_MAX);
@@ -251,7 +255,7 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
   char txt[8] = "";
   switch (func) {
     case F_TONE:  label = "TONE Hz";  val = g_set.toneHz; break;
-    case F_VOL:   label = "VOLUME %"; val = g_set.vol; break;
+    case F_VOL:   label = g_set.vol ? "VOLUME %" : "VOLUME (off)"; val = g_set.vol; break;
     case F_DELAY: label = g_set.delayMs ? "DELAY ms" : "DELAY (server)"; val = g_set.delayMs ? g_set.delayMs : L.delayMs; break;
     case F_MODE:  label = "IAMBIC"; num = false; txt[0] = g_set.mode; txt[1] = 0; break;
     case F_SEND:  label = keyer_msg_active() ? "sending..." : "turn = send"; num = false; strcpy(txt, "TEST"); break;

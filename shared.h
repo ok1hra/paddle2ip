@@ -43,7 +43,7 @@ struct Settings {
   // live (encoder) values, read by the keyer task
   volatile uint8_t  wpm;
   volatile uint16_t toneHz;
-  volatile uint8_t  vol;   // buzzer duty 1..50 %
+  volatile uint8_t  vol;   // buzzer duty 0..50 %, 0 = off
   volatile char     mode;  // 'A' / 'B'
   volatile bool     swap;  // swap dit/dah paddle
   volatile bool     skEnable;   // straight key on PIN_SK
@@ -62,7 +62,7 @@ void settings_key_hex(char out[33]);      // g_set.key as 32 hex chars
 #define WPM_MAX 60
 #define TONE_MIN 300
 #define TONE_MAX 1200
-#define VOL_MIN 1
+#define VOL_MIN 0                // 0 = sidetone off
 #define VOL_MAX 50
 #define DELAY_MAX 1000
 

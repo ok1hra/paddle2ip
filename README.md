@@ -77,7 +77,7 @@ Details: [First setup](#first-setup), [Operation](#operation).
 | Paddle filter | at the connector | 100 Ω in series with each contact, 10 nF to GND |
 | Straight key (optional) | Port A **G13** | to GND, enable on the web page |
 | Headphone tone (optional) | Port A **G15** | PWM square wave: RC low-pass + series resistor, enable on the web page |
-| Sidetone | internal buzzer G3 | LEDC, volume = duty 1–50 % |
+| Sidetone | internal buzzer G3 | LEDC, volume = duty 0–50 % (0 = off) |
 | Encoder / button | G40/G41, G42 | |
 
 **Do not connect the red 5 V wire** of the Grove cable to the paddle.
@@ -249,7 +249,7 @@ Functions (one detent = one step; the display returns to WPM 20 s after the last
 |---|---|---|
 | WPM | 5–60 | 1 |
 | Tone | 300–1200 Hz | 10 Hz |
-| Volume | 1–50 % (buzzer duty) | 1 |
+| Volume | 0 (off) – 50 % (buzzer duty) | 5 % |
 | Delay D | 0 (= server default) or 10–1000 ms | 10 ms |
 | Iambic | A / B | toggle |
 | Rotate | 0 / 180° | toggle |

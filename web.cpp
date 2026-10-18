@@ -154,7 +154,7 @@ static void handle_root() {
   h += F("</fieldset><fieldset><legend>Keyer</legend>");
   field(h, "WPM", "wpm", String(g_set.wpm), "number", "min=5 max=60");
   field(h, "Sidetone Hz", "tone", String(g_set.toneHz), "number", "min=300 max=1200");
-  field(h, "Volume % (buzzer duty 1-50)", "vol", String(g_set.vol), "number", "min=1 max=50");
+  field(h, "Volume % (buzzer duty 0-50, 0 = off)", "vol", String(g_set.vol), "number", "min=0 max=50");
   h += F("<label>Iambic mode<select name=mode><option");
   h += (g_set.mode == 'A') ? F(" selected") : F("");
   h += F(">A</option><option");
@@ -235,7 +235,7 @@ static void handle_save() {
 
   long w = server.arg("wpm").toInt();   if (w) g_set.wpm = constrain(w, WPM_MIN, WPM_MAX);
   long t = server.arg("tone").toInt();  if (t) { g_set.toneHz = constrain(t, TONE_MIN, TONE_MAX); keyer_set_tone(g_set.toneHz); }
-  long vo = server.arg("vol").toInt();  if (vo) g_set.vol = constrain(vo, VOL_MIN, VOL_MAX);
+  if (server.arg("vol").length()) g_set.vol = constrain(server.arg("vol").toInt(), VOL_MIN, VOL_MAX);   // 0 = off
   g_set.mode = (server.arg("mode") == "A") ? 'A' : 'B';
   g_set.swap = server.hasArg("swap");
   g_set.skEnable = server.hasArg("sk");

@@ -51,7 +51,7 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
   repeated session id after a reboot would make the OI3 drop all packets
   (seq restarts at 1).
 - Sidetone: LEDC on G3 runs continuously at the tone frequency, keying only
-  switches the duty 0 / vol % (1–50). M5.Speaker is NOT used (it buffers);
+  switches the duty 0 / vol % (0–50, 0 = off, encoder step 5). M5.Speaker is NOT used (it buffers);
   `cfg.internal_spk = false`. Backlight uses LEDC channel 7, we use 0/1.
 - Keyer task pinned to core 1, `vTaskDelayUntil(…, 1)` (CONFIG_FREERTOS_HZ =
   1000), priority configMAX_PRIORITIES−2. Network, display, web on core 0.
