@@ -173,8 +173,9 @@ template <class G> static void draw_signal(G& g, const LinkState& L) {
   draw_halo(g, loss, 198, 129, TFT_LIGHTGREY);
 }
 
-// TX: solid red edge RING_TX_IN..119 fading to black down to RING_FADE_IN
-static const int RING_TX_IN = 104, RING_FADE_IN = 80;
+// TX: solid red edge RING_TX_IN..119, then a long linear fade to black down to
+// RING_FADE_IN (linear RGB565 already looks smooth through the panel gamma)
+static const int RING_TX_IN = 112, RING_FADE_IN = 62;
 
 template <class G> static void draw_ring(G& g, const LinkState& L) {
   // red for the whole over (OI3 sequencer up), not blinking with every element
@@ -185,7 +186,7 @@ template <class G> static void draw_ring(G& g, const LinkState& L) {
   }
   const int span = RING_TX_IN - RING_FADE_IN;
   for (int r = RING_FADE_IN; r < RING_TX_IN; r += 2) {   // inner first, 3 px wide = no gaps
-    int k = r - RING_FADE_IN, v = 31 * k * k / (span * span);   // quadratic: dark longer
+    int v = 31 * (r - RING_FADE_IN) / span;
     g.fillArc(120, 120, r + 2, r, 0, 360, (uint16_t)(v << 11));
   }
   g.fillArc(120, 120, 119, RING_TX_IN, 0, 360, TFT_RED);
@@ -233,9 +234,8 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
     for (const char* p = s; *p; p++) {
       char c[2] = { *p, 0 };
       bool digit = (*p != ' ' && *p != '.');
-      g.setTextColor(digit && left <= L.seqLevel ? TFT_RED : TFT_WHITE);
+      draw_halo(g, c, x, 50, digit && left <= L.seqLevel ? TFT_RED : TFT_WHITE);   // on the TX glow
       if (digit) left--;
-      g.drawString(c, x, 50);
       x += g.textWidth(c);
     }
     g.setTextDatum(middle_center);
@@ -295,16 +295,15 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
   // warning line
   uint16_t wc;
   const char* w = warning(L, &wc);
-  if (w) { g.setFont(&fonts::FreeSansBold9pt7b); g.setTextColor(wc); g.drawString(w, 120, 183); }
+  if (w) { g.setFont(&fonts::FreeSansBold9pt7b); draw_halo(g, w, 120, 183, wc); }
 
-  // bottom: RTT, delay, OI3 lost/late edges
+  // bottom: R = RTT last/min, D = delay, L = OI3 lost/late edges (legend on the service page)
   g.setFont(&fonts::Font2);
-  g.setTextColor(TFT_LIGHTGREY);
   if (L.fresh && L.rttUs >= 0)
-    snprintf(s, sizeof(s), "RTT %ld/%ld D%u L%u/%u", (long)(L.rttUs / 1000), (long)(L.rttMinUs / 1000),
+    snprintf(s, sizeof(s), "R%ld/%ld D%u L%u/%u", (long)(L.rttUs / 1000), (long)(L.rttMinUs / 1000),
              L.delayMs, L.lostEv, L.lateEv);
   else
-    snprintf(s, sizeof(s), "RTT -- D%u", L.fresh ? L.delayMs : g_set.delayMs);
+    snprintf(s, sizeof(s), "R-- D%u", L.fresh ? L.delayMs : g_set.delayMs);
   draw_halo(g, s, 120, 203, TFT_LIGHTGREY);       // the ends touch the TX ring
   draw_signal(g, L);
 }
@@ -329,12 +328,12 @@ template <class G> static void draw_setup(G& g) {
   int8_t slotOf[WIFI_SLOTS + 1];
   uint8_t n = menu_items(slotOf);
   if (menuSel >= n) menuSel = n - 1;
-  int y = 110;
-  for (uint8_t i = 0; i < n; i++, y += 20) {
+  int y = 106;
+  for (uint8_t i = 0; i < n; i++, y += 17) {     // up to 1 + WIFI_SLOTS = 5 items
     bool sel = (i == menuSel);
     if (slotOf[i] < 0) snprintf(s, sizeof(s), "%s", n > 1 ? "best in range" : "no saved WiFi");
     else               snprintf(s, sizeof(s), "%d: %.18s", slotOf[i] + 1, g_set.ssid[slotOf[i]]);
-    if (sel) g.fillRoundRect(40, y - 9, 160, 19, 4, 0x2945);
+    if (sel) g.fillRoundRect(40, y - 8, 160, 17, 4, 0x2945);
     g.setTextColor(sel ? TFT_YELLOW : TFT_LIGHTGREY);
     g.drawString(s, 120, y);
   }
@@ -352,8 +351,8 @@ template <class G> static void draw_info(G& g, const LinkState& L) {
   g.drawString(FW_VERSION, 120, 34);
   g.setTextColor(TFT_WHITE);
   char s[64];
-  int y = 52;                                    // up to 8 lines, the last at y 164
-  auto line = [&](const char* t) { g.drawString(t, 120, y); y += 16; };
+  int y = 52;                                    // up to 8 lines, the last at y 157
+  auto line = [&](const char* t) { g.drawString(t, 120, y); y += 15; };
   if (wlan_ap_on()) {
     snprintf(s, sizeof(s), "AP %s", wlan_ap_name()); line(s);
     snprintf(s, sizeof(s), "http://%s", WiFi.softAPIP().toString().c_str()); line(s);
@@ -370,12 +369,19 @@ template <class G> static void draw_info(G& g, const LinkState& L) {
   snprintf(s, sizeof(s), "bad tag %lu | %c key%s", (unsigned long)L.badTag, g_set.mode, g_set.swap ? " swap" : ""); line(s);
   snprintf(s, sizeof(s), "login %s / %s", WEB_USER, g_set.webPass); line(s);
 
-  // legend of the main screen bottom line "RTT 23/18 D80 L0/0"
-  g.drawFastHLine(70, 175, 100, 0x4208);
-  g.setTextColor(0x8410);
-  g.drawString("RTT last / min ms", 120, 186);
-  g.drawString("D playout delay ms", 120, 202);
-  g.drawString("L lost / late edges", 120, 218);
+  // legend of the main screen bottom line "R4/3 D120 L0/391", with the values
+  g.drawFastHLine(70, 165, 100, 0x4208);
+  g.setTextColor(TFT_LIGHTGREY);
+  if (L.fresh && L.rttUs >= 0)
+    snprintf(s, sizeof(s), "R %ld/%ld RTT last/min ms", (long)(L.rttUs / 1000), (long)(L.rttMinUs / 1000));
+  else strcpy(s, "R -- RTT last/min ms");
+  g.drawString(s, 120, 174);
+  snprintf(s, sizeof(s), "D %u playout delay ms", L.fresh ? L.delayMs : g_set.delayMs);
+  g.drawString(s, 120, 189);
+  if (L.fresh) snprintf(s, sizeof(s), "L %u/%u lost/late edges", L.lostEv, L.lateEv);
+  else         strcpy(s, "L -/- lost/late edges");
+  if (g.textWidth(s) > 170) *strrchr(s, ' ') = 0;   // huge counters: drop "edges"
+  g.drawString(s, 120, 204);
 }
 
 template <class G> static void paint(G& g, const LinkState& L) {

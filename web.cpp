@@ -72,7 +72,17 @@ static const char HEAD[] PROGMEM =
   "#nets div{padding:.35em;border-bottom:1px solid #ccc;cursor:pointer}#nets div:hover{background:#eef}"
   "#nets span{float:right;color:#666}</style>"
   "<script>function eye(b){var i=b.previousElementSibling;i.type=i.type=='password'?'text':'password'}</script>"
-  "</head><body><h2>Paddle2IP</h2>";
+  "</head><body><h2 id=title>Paddle2IP</h2>"
+  // newer release? The browser asks the web flasher (manifest.json written by
+  // release.sh), so Paddle2IP itself needs no internet; offline = no warning.
+  // FW_REV is YYYYMMDD[.N] -> compare as YYYYMMDD * 1000 + N.
+  "<script>(function(){function v(s){var p=String(s).split('.');return(+p[0]||0)*1000+(+p[1]||0)}"
+  "fetch('" FLASH_URL "manifest.json?'+Date.now(),{cache:'no-store'}).then(function(r){return r.json()})"
+  ".then(function(m){if(v(m.version)<=v('" FW_REV "'))return;var a=document.createElement('a');"
+  "a.href='" FLASH_URL "';a.target='_blank';a.style.cssText='display:block;font-size:.6em;color:#c00';"
+  "a.textContent='\u26a0 newer firmware '+m.version+' available (running " FW_REV "), update with the web flasher';"
+  "document.getElementById('title').appendChild(a);document.title='\u26a0 '+document.title})"
+  ".catch(function(){})})()</script>";
 
 static void field(String& h, const char* label, const char* name, const String& value,
                   const char* type = "text", const char* extra = "") {
@@ -98,8 +108,8 @@ static void check(String& h, const char* label, const char* name, bool on) {
 // the first empty slot, else the focused one
 static const char NETS_JS[] PROGMEM =
   "<script>var slot=0;function $(i){return document.getElementById(i)}"
-  "for(let i=0;i<3;i++){$('ssid'+i).onfocus=function(){slot=i}}"
-  "function pick(s){var k=slot;if($('ssid'+slot).value){for(let i=0;i<3;i++){if(!$('ssid'+i).value){k=i;break}}}"
+  "for(let i=0;i<SLOTS;i++){$('ssid'+i).onfocus=function(){slot=i}}"
+  "function pick(s){var k=slot;if($('ssid'+slot).value){for(let i=0;i<SLOTS;i++){if(!$('ssid'+i).value){k=i;break}}}"
   "$('ssid'+k).value=s;$('pass'+k).value='';$('pass'+k).focus()}"
   "function show(j){var d=$('nets');d.innerHTML='';"
   "j.nets.forEach(function(n){var e=document.createElement('div');e.textContent=n.s+(n.o?' (open)':'');"
@@ -160,7 +170,9 @@ static void handle_root() {
   h += F("</fieldset><button>Save</button></form>"
          "<form method=post action=/genkey onsubmit=\"return confirm('Replace the shared key? The server (OI3 RkeyKey) must get the new key too.')\">"
          "<button>Generate new key</button></form>");
-  h += F("<script>var AUTOSCAN="); h += ap ? '1' : '0'; h += F(";</script>");
+  h += F("<p>Firmware update: <a href=" FLASH_URL " target=_blank>web flasher</a> "
+         "(Chrome / Edge, Dial on USB; the settings are kept) &middot; <a href=" FW_URL " target=_blank>GitHub</a></p>");
+  h += F("<script>var AUTOSCAN="); h += ap ? '1' : '0'; h += F(",SLOTS=" STR(WIFI_SLOTS) ";</script>");
   h += FPSTR(NETS_JS);
   h += F("</body></html>");
   server.send(200, "text/html", h);

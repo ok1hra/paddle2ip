@@ -9,6 +9,7 @@
 
 #define FW_VERSION "Paddle2IP " FW_REV
 #define FW_URL     "https://github.com/ok1hra/paddle2ip"
+#define FLASH_URL  "https://ok1hra.github.io/paddle2ip/"   // web flasher (release.sh, gh-pages)
 
 // ---------------- pins (M5Dial v1.1) ----------------
 #define PIN_DIT    2    // Port B G2  (paddle common -> GND)
@@ -25,7 +26,9 @@
 
 #define WEB_USER         "admin"
 #define WEB_PASS_DEFAULT "paddle2ip"
-#define WIFI_SLOTS       3
+#define WIFI_SLOTS       4
+#define STR_(x) #x
+#define STR(x)  STR_(x)          // number macro -> string literal (web page JS)
 
 // ---------------- settings (NVS) ----------------
 struct Settings {

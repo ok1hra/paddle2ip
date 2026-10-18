@@ -57,7 +57,7 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
   1000), priority configMAX_PRIORITIES−2. Network, display, web on core 0.
 - NVS writes stall both cores (flash cache off) → settings are saved only
   after the keyer has been idle for 2 s. `WiFi.persistent(false)`.
-- WiFi: `setSleep(false)`; 3 saved networks; ONE async scan of all channels,
+- WiFi: `setSleep(false)`; 4 saved networks (`WIFI_SLOTS`, the web JS gets it as `SLOTS`); ONE async scan of all channels,
   then join the strongest saved network by channel + BSSID (the user asked
   explicitly not to try the networks one by one). No scanning while connected
   unless the web page asks. `setAutoReconnect(false)`; own re-join logic.
@@ -75,6 +75,10 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
   cached manifest never points at newer binaries. gh-pages is regenerated
   from `tools/webflash/index.html` with git plumbing (temp index), never
   edited by hand.
+- Update check on the web page is done by the BROWSER: it fetches
+  `FLASH_URL manifest.json` (GitHub Pages sends `Access-Control-Allow-Origin: *`)
+  and compares `version` with FW_REV as YYYYMMDD*1000+N. No OTA (user's
+  decision), the update itself stays the USB web flasher.
 - Encoder via PCNT (x4), `ENC_DIRECTION = −1` (the first hardware feedback
   said it was reversed). `ENC_COUNTS_PER_DETENT = 4` still to verify.
 

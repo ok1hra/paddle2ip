@@ -7,15 +7,20 @@ to a server at the transceiver. The server replays every edge a fixed time
 later (the playout delay), so the marks and spaces on air are as long as the
 keyer made them, whatever the network jitter is.
 
-The reference server is the **Open Interface III (OI3)** firmware,
-https://github.com/ok1hra/oi3 (`rkey.ino`). Any other device can be a server;
-see [Implementing a server](#implementing-a-server).
+Supported servers:
+
+| Server | Device | Notes |
+|---|---|---|
+| **Open Interface III (OI3)**, https://github.com/ok1hra/oi3 | OI3 interface board (ATmega2560 + W5500), keys the CW line through its PTT sequencer (`rkey.ino`) | reference implementation |
+| **WIFILT**, https://github.com/ok1hra/wifilt | web interface for Icom LAN transceivers (ESP32, or a native program on a PC) | support not published yet (uncommitted change in WIFILT) |
+
+Any other device can be a server; see [Implementing a server](#implementing-a-server).
 
 ```
 paddle ─► Paddle2IP: iambic keyer ─► sidetone (buzzer / headphones, 0 ms)
                       │ KEY: edges (t_us, up/down), 8× redundant, SipHash tag
                       ▼ UDP 5690
-          server (OI3): jitter buffer ─► CW key line (+ PTT sequencer)
+          server (OI3, WIFILT): jitter buffer ─► CW key line (+ PTT sequencer)
                       │ STATUS: nonce, RTT echo, rig freq/mode, counters
                       ▼
           Paddle2IP display: WPM, link, delay, rig freq/mode, WiFi signal
@@ -36,8 +41,9 @@ paddle ─► Paddle2IP: iambic keyer ─► sidetone (buzzer / headphones, 0 ms
    by itself (otherwise http://192.168.4.1). Enter your WiFi, the server
    address (port 5690) and the shared key — *Generate new key* shows a
    `[RkeyKey=...]` line for the server. *Save*.
-4. **Server** (OI3): put `[RkeyEnable=1]` and the same `[RkeyKey=...]` in
-   `oi3.cfg` on the SD card and restart it.
+4. **Server**: OI3 — put `[RkeyEnable=1]` and the same `[RkeyKey=...]` in
+   `oi3.cfg` on the SD card and restart it. WIFILT — set the same shared key
+   as described in the WIFILT documentation.
 5. **Key**: the ring turns green when the server answers. Turn the knob for
    WPM, a short press selects the next function (tone, volume, delay, iambic
    A/B, rotation, test, monitor, info), a long press shows the service page.
@@ -129,14 +135,15 @@ survive unless the user chooses erase.
    `Paddle2IP-XXXX`, its password (default `paddle2ip`) and `http://192.168.4.1`.
 2. Join that WiFi with a phone or laptop. The configuration page opens by
    itself (captive portal); if not, open http://192.168.4.1.
-3. Up to three WiFi networks: the page scans and lists the networks in range,
+3. Up to four WiFi networks: the page scans and lists the networks in range,
    a click fills the SSID, type the password.
-4. Server: the OI3 IP address or hostname and UDP port (OI3 `RkeyPort`, default 5690).
+4. Server: the IP address or hostname of the OI3 / WIFILT and the UDP port (OI3 `RkeyPort`, default 5690).
 5. Shared key: either paste the 32-hex-char key from the server, or press
    *Generate new key* and copy the shown `[RkeyKey=...]` line into `oi3.cfg`
    on the OI3 SD card. The key can be shown again later on the page (eye
    button) or with the serial command `key`.
-6. On the OI3 set `[RkeyEnable=1]` and the same `RkeyKey`, restart it.
+6. On the OI3 set `[RkeyEnable=1]` and the same `RkeyKey`, restart it. A WIFILT
+   gets the same key; see the WIFILT documentation.
 7. *Save*. Paddle2IP reboots, joins the strongest saved network and connects.
    The ring turns green when the server answers.
 
@@ -155,24 +162,25 @@ survive unless the user chooses erase.
 
 | Area | Content |
 |---|---|
-| ring | **red**, thick and fading to black towards the centre = TX on the server (PTT sequencer up, the whole over, not each element); dark green = live link (the server answers our session); grey = no link |
+| ring | **red** edge with a long fade to black towards the centre = TX on the server (PTT sequencer up, the whole over, not each element); dark green = live link (the server answers our session); grey = no link |
 | top | rig frequency `14 023.75` (MHz kHz.Hz/10, from the server; `-- ---.--` = unknown). The sequencer level n colours the last n digits red (0 = none, 5 = five digits) |
 | centre | big value of the selected function: WPM in white, the others in yellow with their name below (`TONE Hz`, `VOLUME %`, `DELAY ms`, …). *Monitor* shows `CONN`/`DISC` and the element trace instead |
 | left of centre | WiFi signal, vertical bargraph of 4 segments (bottom = weakest) |
 | right of centre | WiFi signal in dBm; below it the packet loss `up/down %` (up = Paddle2IP → server as reported by the server, down = server → Paddle2IP; `-` = not known yet) |
 | warning line | the first applicable warning, see below; empty when all is well |
-| bottom | `RTT 23/18 D80 L0/0`, see below |
+| bottom | `R4/3 D120 L0/391`, see below |
 
 WiFi signal colour: green ≥ −65 dBm, orange −65 … −75 dBm (at the edge), red
 below −75 dBm (drop-outs likely). Thresholds: `RSSI_GOOD` / `RSSI_EDGE` in `shared.h`.
 
-Bottom line `RTT 23/18 D80 L0/0` (the [service page](#service-page) has a legend):
+Bottom line, e.g. `R4/3 D120 L0/391` (the [service page](#service-page)
+shows the same values with a legend):
 
-| Field | Meaning |
-|---|---|
-| `RTT 23/18` | round-trip time to the server in ms: last / minimum of the last ~5 s. `RTT --` = no measurement (no link) |
-| `D80` | playout delay in ms the server uses (your *Delay D*, or the server default `RkeyDelayMs`) |
-| `L0/0` | server edge counters: lost (never received, the gap was longer than the redundancy) / late (arrived after their playout time and were shifted) |
+| Field | Example | Meaning | Values |
+|---|---|---|---|
+| `R` last/min | `R4/3` | round-trip time to the server in ms: the last one / the minimum of the last ~5 s. `R--` = no measurement (no link) | LAN 1–10, internet 20–100, LTE 50–200+. *last* far above *min* = jitter, D must cover it |
+| `D` | `D120` | playout delay in ms the server uses: your *Delay D*, or the server default `RkeyDelayMs` when D = 0. The server may raise it after late edges and on the first element of an over | see [Choosing the playout delay](#choosing-the-playout-delay) |
+| `L` lost/late | `L0/391` | server edge counters since the server (OI3) started, 0…65535 | **lost** = edges never received (a drop-out longer than the redundancy of 500 ms / 8 edges): should stay 0, growing = bad WiFi/link. **late** = edges that arrived after their playout time, the rest of the over was shifted: growing while you key = D too small |
 
 Warnings, in order of priority (only the first one is shown):
 
@@ -212,7 +220,7 @@ Long press, from any screen; a short or long press closes it.
 | `sessID XXXX tx N` | session id of this boot and the number of packets sent |
 | `bad tag N \| B key swap` | STATUS packets with a wrong authentication tag (wrong key or spoofing), iambic mode A/B, `swap` = paddles swapped |
 | `login admin / <password>` | web page login |
-| legend | meaning of the main screen bottom line: `RTT` last / min ms, `D` playout delay ms, `L` lost / late edges |
+| legend | the main screen bottom line with its current values: `R 4/3 RTT last/min ms`, `D 120 playout delay ms`, `L 0/391 lost/late edges` (see [Main screen](#main-screen)) |
 
 #### Setup screen
 
@@ -223,7 +231,7 @@ Yellow ring. See [Setup mode](#setup-mode).
 | `SETUP` | |
 | `Paddle2IP-XXXX`, `pass <password>` | name and WPA2 password of the own AP |
 | `http://192.168.4.1` | configuration page |
-| list | `best in range` (the strongest saved network in range) and the saved networks `1: SSID` … `3: SSID`; the selected one is highlighted. `no saved WiFi` when nothing is saved |
+| list | `best in range` (the strongest saved network in range) and the saved networks `1: SSID` … `4: SSID`; the selected one is highlighted. `no saved WiFi` when nothing is saved |
 | state | WiFi state, `scanning...` while scanning |
 | `turn = select, press = join` | |
 
@@ -266,7 +274,7 @@ nobody uses it.
 
 ### WiFi
 
-Up to three networks are saved. Paddle2IP does **one** scan of all channels
+Up to four networks are saved. Paddle2IP does **one** scan of all channels
 (about 1.5 s) and joins the strongest saved network in range directly by
 channel and BSSID; it never waits for networks that are not there. A lost
 link is re-joined on the same AP for 6 s, then a new scan picks the best
@@ -279,13 +287,19 @@ network again. Scans never run while connected unless the web page asks
 `paddle2ip`, also the AP password). Clients of the Paddle2IP AP need no login,
 because joining the AP already took the same password.
 
-- WiFi networks: list of networks in range (*Scan*), three SSID/password slots.
+- WiFi networks: list of networks in range (*Scan*), four SSID/password slots.
 - Server: IP or hostname, port, shared key, playout delay D.
 - Keyer: WPM, tone, volume, iambic A/B, paddle swap, straight key on G13,
   headphone tone on G15, display rotation.
 - Login: the web/AP password.
 - *Generate new key*: stores a random key and shows the `[RkeyKey=...]` line for `oi3.cfg`.
 - `/status`: link state as JSON.
+- Links to the [web flasher](https://ok1hra.github.io/paddle2ip/) (firmware
+  update over USB in Chrome / Edge, settings are kept) and to GitHub.
+- Update check: the browser reads the version of the web flasher
+  (`manifest.json` on GitHub Pages). If it is newer than the running firmware,
+  the title shows a warning with a link to the flasher. Paddle2IP itself needs
+  no internet for this; without internet in the browser nothing is shown.
 
 Every password field has a show/hide button. WiFi and web passwords and the
 shared key are filled in, so the key can be copied later. The page is plain
