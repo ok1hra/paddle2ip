@@ -171,6 +171,12 @@ survive unless the user chooses erase.
 | warning line | the first applicable warning, see below; empty when all is well |
 | bottom | `R4/3 D120 L0/391`, see below |
 
+While the fallback AP is up and no WiFi network is joined (see
+[Setup mode](#setup-mode)), the top shows the AP name `AP Paddle2IP-XXXX` and
+its password, the bottom the page address `http://192.168.4.1` and the WiFi
+status (`scanning...`, `no saved WiFi in range`, `joining …`); the signal and
+the bottom line are hidden. The centre and the encoder work as usual.
+
 WiFi signal colour: green ≥ −65 dBm, orange −65 … −75 dBm (at the edge), red
 below −75 dBm (drop-outs likely). Thresholds: `RSSI_GOOD` / `RSSI_EDGE` in `shared.h`.
 

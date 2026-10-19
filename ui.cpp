@@ -6,6 +6,8 @@
 // CONN/DISC + trace of the sent elements, turn = clear / info: FW revision,
 // GitHub QR code + own IP); the display falls back to WPM FUNC_HOLD_MS after
 // the last change (info: INFO_HOLD_MS, monitor: stays).
+// With the fallback AP up and no WiFi the main screen shows the AP name,
+// password, page URL and WiFi status instead of frequency / warning / link.
 // Setup screen (AP mode): encoder selects a saved network or "best in range",
 // short press joins it; on success Paddle2IP leaves setup mode.
 // Long press (both): service page (IP, RSSI, server, counters, legend of the
@@ -220,15 +222,32 @@ template <class G> static void draw_about(G& g, const LinkState& L) {
   else                     { g.setTextColor(0x8410); g.drawString("no IP", 120, 208); }
 }
 
+// Font2 line, Font0 when wider than w (long passwords / status texts)
+template <class G> static void draw_fit(G& g, const char* t, int y, int w, uint16_t col) {
+  g.setFont(&fonts::Font2);
+  if (g.textWidth(t) > w) g.setFont(&fonts::Font0);
+  g.setTextColor(col);
+  g.drawString(t, 120, y);
+}
+
 template <class G> static void draw_main(G& g, const LinkState& L) {
   g.fillScreen(TFT_BLACK);
   draw_ring(g, L);
 
   g.setTextDatum(middle_center);
   char s[40];
-  // rig frequency "14 023.75"; sequencer level n colours the last n digits
+  // fallback AP and no STA: no frequency, warning or link numbers to show,
+  // the screen tells how to reach the web page instead
+  bool ap = wlan_ap_on() && !L.wifi;
   g.setFont(&fonts::Font4);
-  if (L.fresh && (L.flags & RKEY_SF_CIV_VALID) && L.freqHz) {
+  if (ap) {
+    snprintf(s, sizeof(s), "AP %s", wlan_ap_name());
+    draw_fit(g, s, 32, 140, TFT_YELLOW);
+    char p[48];
+    snprintf(p, sizeof(p), "pass %s", g_set.webPass);
+    draw_fit(g, p, 50, 176, TFT_WHITE);
+  } else if (L.fresh && (L.flags & RKEY_SF_CIV_VALID) && L.freqHz) {
+    // rig frequency "14 023.75"; sequencer level n colours the last n digits
     snprintf(s, sizeof(s), "%lu %03lu.%02lu", (unsigned long)(L.freqHz / 1000000UL),
              (unsigned long)((L.freqHz / 1000UL) % 1000UL), (unsigned long)((L.freqHz % 1000UL) / 10UL));
     int x = 120 - g.textWidth(s) / 2;
@@ -295,6 +314,13 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
     g.drawString(label, 120, 162);
   }
   g.setTextSize(1);
+
+  if (ap) {
+    snprintf(s, sizeof(s), "http://%s", WiFi.softAPIP().toString().c_str());
+    draw_fit(g, s, 183, 190, TFT_CYAN);
+    draw_fit(g, wlan_scanning() ? "scanning..." : wlan_status(), 203, 150, TFT_ORANGE);
+    return;
+  }
 
   // warning line
   uint16_t wc;
