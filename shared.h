@@ -63,7 +63,7 @@ void settings_key_hex(char out[33]);      // g_set.key as 32 hex chars
 #define TONE_MIN 300
 #define TONE_MAX 1200
 #define VOL_MIN 0                // 0 = sidetone off
-#define VOL_MAX 50
+#define VOL_MAX 100              // 100 = 50 % duty, -2 dB per 5 (keyer.cpp)
 #define DELAY_MAX 1000
 
 // WiFi signal quality on the display
@@ -99,6 +99,10 @@ void        wlan_connect(int8_t slot);  // -1 = best saved network in the air
 const char* wlan_status();              // short text for the display
 bool        wlan_scan_start();          // refresh the list for the web page
 bool        wlan_scanning();
+// After power-on with >= 2 saved networks in range the join waits for a choice:
+// wlan_choices() lists them (slot, RSSI; strongest first), wlan_connect(slot) joins.
+bool        wlan_choosing();
+uint8_t     wlan_choices(int8_t* slot, int8_t* rssi, uint8_t max);
 uint8_t     wlan_nets(WlanNet* out, uint8_t max);
 
 // ---------------- serial console (console.cpp, ui task) ----------------

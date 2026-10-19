@@ -154,7 +154,7 @@ static void handle_root() {
   h += F("</fieldset><fieldset><legend>Keyer</legend>");
   field(h, "WPM", "wpm", String(g_set.wpm), "number", "min=5 max=60");
   field(h, "Sidetone Hz", "tone", String(g_set.toneHz), "number", "min=300 max=1200");
-  field(h, "Volume % (buzzer duty 0-50, 0 = off)", "vol", String(g_set.vol), "number", "min=0 max=50");
+  field(h, "Volume 0-100 (2 dB per 5, 100 = max, 0 = off)", "vol", String(g_set.vol), "number", "min=0 max=100");
   h += F("<label>Iambic mode<select name=mode><option");
   h += (g_set.mode == 'A') ? F(" selected") : F("");
   h += F(">A</option><option");

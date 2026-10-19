@@ -78,7 +78,7 @@ Details: [First setup](#first-setup), [Operation](#operation).
 | Paddle filter | at the connector | 100 Ω in series with each contact, 10 nF to GND |
 | Straight key (optional) | Port A **G13** | to GND, enable on the web page |
 | Headphone tone (optional) | Port A **G15** | PWM square wave: RC low-pass + series resistor, enable on the web page |
-| Sidetone | internal buzzer G3 | LEDC, volume = duty 0–50 % (0 = off) |
+| Sidetone | internal buzzer G3 | LEDC square wave at the tone frequency; volume 0–100 is mapped to the duty (max 50 %) so that every step of 5 is 2 dB (0 = off) |
 | Encoder / button | G40/G41, G42 | |
 
 **Do not connect the red 5 V wire** of the Grove cable to the paddle.
@@ -158,6 +158,7 @@ survive unless the user chooses erase.
 | [Info](#info-function) | function *Info* (short presses) |
 | [Service page](#service-page) | long press, from any screen; short or long press closes it |
 | [Setup screen](#setup-screen) | button held at power-on, or no network saved |
+| [Choose WiFi](#choose-wifi-screen) | power-on with two or more saved networks in range |
 
 #### Main screen
 
@@ -242,9 +243,21 @@ Yellow ring. See [Setup mode](#setup-mode).
 | state | WiFi state, `scanning...` while scanning |
 | `turn = select, press = join` | |
 
+#### Choose WiFi screen
+
+Shown after power-on when the first scan finds two or more saved networks
+(see [WiFi](#wifi)).
+
+| Line | Content |
+|---|---|
+| `CHOOSE WiFi` | |
+| list | the saved networks in range, strongest first, with RSSI in dBm (green / orange / red as on the main screen); the selected one is highlighted |
+| `turn = select, press = join` | |
+| `join in 10 s` | countdown: untouched, the strongest network is joined; it stops when the encoder is turned |
+
 ### Encoder and button
 
-| Action | Key screen | Setup screen |
+| Action | Key screen | Setup / Choose WiFi screen |
 |---|---|---|
 | turn | change the selected value | select a network |
 | short press | next function | join the selected network |
@@ -283,7 +296,10 @@ nobody uses it.
 
 Up to four networks are saved. Paddle2IP does **one** scan of all channels
 (about 1.5 s) and joins the strongest saved network in range directly by
-channel and BSSID; it never waits for networks that are not there. A lost
+channel and BSSID; it never waits for networks that are not there. After
+power-on, when two or more saved networks are in range, the display asks
+which one to join ([Choose WiFi](#choose-wifi-screen)); without an answer the
+strongest one is joined after 10 s. A lost
 link is re-joined on the same AP for 6 s, then a new scan picks the best
 network again. Scans never run while connected unless the web page asks
 (a scan takes the radio off the channel for a moment). Modem sleep is off.

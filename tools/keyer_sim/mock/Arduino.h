@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 typedef void* TaskHandle_t; typedef uint32_t TickType_t;
 struct IPAddress { uint32_t a; };
 struct portMUX_TYPE { int x; };

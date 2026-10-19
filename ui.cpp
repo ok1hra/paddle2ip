@@ -10,6 +10,8 @@
 // password, page URL and WiFi status instead of frequency / warning / link.
 // Setup screen (AP mode): encoder selects a saved network or "best in range",
 // short press joins it; on success Paddle2IP leaves setup mode.
+// Choose screen (power-on, >= 2 saved networks in range): encoder selects,
+// short press joins; untouched for CHOOSE_AUTO_MS it joins the strongest.
 // Long press (both): service page (IP, RSSI, server, counters, legend of the
 // main screen bottom line).
 #include "shared.h"
@@ -32,6 +34,10 @@ static uint32_t dirtyMs = 0;
 static int8_t   menuSel = 0;                     // setup menu: 0 = best in range, 1.. = saved slots
 static const uint32_t FUNC_HOLD_MS = 20000;      // back to WPM after the last change
 static const uint32_t INFO_HOLD_MS = 60000;
+static int8_t   chooseSel = 0;                   // choose menu, 0 = strongest
+static bool     chooseHold = false;              // encoder turned: no automatic join
+static uint32_t chooseMs = 0;
+static const uint32_t CHOOSE_AUTO_MS = 10000;
 
 static M5Canvas canvas(&M5Dial.Display);
 static bool     haveCanvas = false;
@@ -107,6 +113,12 @@ static uint8_t menu_items(int8_t* slotOf) {
   slotOf[n++] = -1;
   for (int i = 0; i < WIFI_SLOTS; i++) if (g_set.ssid[i][0]) slotOf[n++] = i;
   return n;
+}
+
+static void choose_join() {
+  int8_t slot[WIFI_SLOTS], rssi[WIFI_SLOTS];
+  uint8_t n = wlan_choices(slot, rssi, WIFI_SLOTS);
+  if (n) wlan_connect(slot[chooseSel < n ? chooseSel : 0]);
 }
 
 // ---------------- server address ----------------
@@ -373,6 +385,45 @@ template <class G> static void draw_setup(G& g) {
   g.drawString("turn = select, press = join", 120, 214);
 }
 
+template <class G> static void draw_choose(G& g, const LinkState& L) {
+  g.fillScreen(TFT_BLACK);
+  draw_ring(g, L);
+  g.setTextDatum(middle_center);
+  g.setFont(&fonts::FreeSansBold9pt7b);
+  g.setTextColor(TFT_YELLOW);
+  g.drawString("CHOOSE WiFi", 120, 44);
+  int8_t slot[WIFI_SLOTS], rssi[WIFI_SLOTS];
+  uint8_t n = wlan_choices(slot, rssi, WIFI_SLOTS);
+  if (chooseSel >= n) chooseSel = n ? n - 1 : 0;
+  char s[40];
+  int y = 120 - (n - 1) * 13;                    // list centred, 26 px rows, max WIFI_SLOTS = 4
+  for (uint8_t i = 0; i < n; i++, y += 26) {
+    bool sel = (i == chooseSel);
+    if (sel) g.fillRoundRect(28, y - 11, 184, 22, 5, 0x2945);
+    g.setFont(&fonts::Font2);
+    snprintf(s, sizeof(s), "%s", g_set.ssid[slot[i]]);
+    if (g.textWidth(s) > 136) g.setFont(&fonts::Font0);
+    g.setTextDatum(middle_left);
+    g.setTextColor(sel ? TFT_YELLOW : TFT_LIGHTGREY);
+    g.drawString(s, 36, y);
+    g.setFont(&fonts::Font2);
+    snprintf(s, sizeof(s), "%d", rssi[i]);
+    g.setTextDatum(middle_right);
+    g.setTextColor(rssi[i] >= RSSI_GOOD ? TFT_GREEN : rssi[i] >= RSSI_EDGE ? TFT_ORANGE : TFT_RED);
+    g.drawString(s, 204, y);
+  }
+  g.setTextDatum(middle_center);
+  g.setFont(&fonts::Font2);
+  g.setTextColor(0x8410);
+  g.drawString("turn = select, press = join", 120, 186);
+  if (!chooseHold) {
+    uint32_t left = (CHOOSE_AUTO_MS - (millis() - chooseMs) + 999) / 1000;
+    snprintf(s, sizeof(s), "join in %lu s", (unsigned long)left);
+    g.setTextColor(TFT_ORANGE);
+    g.drawString(s, 120, 204);
+  }
+}
+
 template <class G> static void draw_info(G& g, const LinkState& L) {
   g.fillScreen(TFT_BLACK);
   g.setTextDatum(middle_center);
@@ -417,6 +468,7 @@ template <class G> static void draw_info(G& g, const LinkState& L) {
 template <class G> static void paint(G& g, const LinkState& L) {
   if (infoPage)                 draw_info(g, L);
   else if (wlan_setup_mode())   draw_setup(g);
+  else if (wlan_choosing())     draw_choose(g, L);
   else if (func == F_INFO)      draw_about(g, L);
   else                          draw_main(g, L);
 }
@@ -433,10 +485,14 @@ static void draw() {
 // ---------------- task ----------------
 static void ui_task(void*) {
   uint32_t drawMs = 0;
+  bool wasChoose = false;
   for (;;) {
     M5Dial.update();
     uint32_t ms = millis();
     bool setup = wlan_setup_mode();
+    bool choose = wlan_choosing();
+    if (choose && !wasChoose) { chooseSel = 0; chooseHold = false; chooseMs = ms; drawMs = 0; }
+    wasChoose = choose;
     int s = enc_steps();
     if (M5Dial.BtnA.wasHold()) { infoPage = !infoPage; drawMs = 0; }
     else if (M5Dial.BtnA.wasClicked()) {
@@ -446,6 +502,7 @@ static void ui_task(void*) {
         uint8_t n = menu_items(slotOf);
         if (n > 1) wlan_connect(slotOf[menuSel < n ? menuSel : 0]);
       }
+      else if (choose) choose_join();
       else { func = (Func)((func + 1) % F_COUNT); funcMs = ms; }
       drawMs = 0;
     }
@@ -453,9 +510,14 @@ static void ui_task(void*) {
       if (setup) {
         int8_t slotOf[WIFI_SLOTS + 1];
         menuSel = clampi(menuSel + s, 0, menu_items(slotOf) - 1);
+      } else if (choose) {
+        int8_t slot[WIFI_SLOTS], rssi[WIFI_SLOTS];
+        chooseSel = clampi(chooseSel + s, 0, wlan_choices(slot, rssi, WIFI_SLOTS) - 1);
+        chooseHold = true;
       } else apply_steps(s);
       drawMs = 0;
     }
+    if (choose && !chooseHold && ms - chooseMs >= CHOOSE_AUTO_MS) choose_join();
     if (func == F_SEND && keyer_msg_active()) funcMs = ms;   // stay while sending
     if (func != F_WPM && func != F_MON && ms - funcMs > (func == F_INFO ? INFO_HOLD_MS : FUNC_HOLD_MS)) { func = F_WPM; drawMs = 0; }
 

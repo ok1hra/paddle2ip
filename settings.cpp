@@ -14,7 +14,7 @@ void settings_defaults() {
   strcpy(g_set.webPass, WEB_PASS_DEFAULT);
   g_set.wpm      = 22;
   g_set.toneHz   = 600;
-  g_set.vol      = 25;
+  g_set.vol      = 80;
   g_set.mode     = 'B';
   g_set.swap     = false;
   g_set.skEnable = false;
@@ -68,7 +68,7 @@ void settings_load() {
   g_set.delayMs = p.getUShort("delay", g_set.delayMs);
   g_set.wpm     = clampu(p.getUChar("wpm", g_set.wpm), WPM_MIN, WPM_MAX);
   g_set.toneHz  = clampu(p.getUShort("tone", g_set.toneHz), TONE_MIN, TONE_MAX);
-  g_set.vol     = clampu(p.getUChar("vol", g_set.vol), VOL_MIN, VOL_MAX);
+  g_set.vol     = clampu(p.getUChar("vol2", g_set.vol), VOL_MIN, VOL_MAX);
   char m        = (char)p.getUChar("mode", g_set.mode);
   g_set.mode    = (m == 'A') ? 'A' : 'B';
   g_set.swap    = p.getBool("swap", g_set.swap);
@@ -96,7 +96,7 @@ void settings_save() {
   p.putUShort("delay", g_set.delayMs);
   p.putUChar("wpm", g_set.wpm);
   p.putUShort("tone", g_set.toneHz);
-  p.putUChar("vol", g_set.vol);
+  p.putUChar("vol2", g_set.vol);   // "vol" was the raw duty 0-50
   p.putUChar("mode", (uint8_t)g_set.mode);
   p.putBool("swap", g_set.swap);
   p.putBool("sk", g_set.skEnable);

@@ -51,7 +51,9 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
   repeated session id after a reboot would make the OI3 drop all packets
   (seq restarts at 1).
 - Sidetone: LEDC on G3 runs continuously at the tone frequency, keying only
-  switches the duty 0 / vol % (0–50, 0 = off, encoder step 5). M5.Speaker is NOT used (it buffers);
+  switches the duty 0 / vol_duty(vol): fundamental ∝ sin(π·duty), so vol 1–100 is
+  linear in dB (40 dB range, 2 dB per encoder step 5, 100 = 50 % duty, 0 = off),
+  LEDC 14 bits, NVS key `vol2` (old `vol` was the raw duty 0–50). M5.Speaker is NOT used (it buffers);
   `cfg.internal_spk = false`. Backlight uses LEDC channel 7, we use 0/1.
 - Keyer task pinned to core 1, `vTaskDelayUntil(…, 1)` (CONFIG_FREERTOS_HZ =
   1000), priority configMAX_PRIORITIES−2. Network, display, web on core 0.
@@ -59,7 +61,10 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
   after the keyer has been idle for 2 s. `WiFi.persistent(false)`.
 - WiFi: `setSleep(false)`; 4 saved networks (`WIFI_SLOTS`, the web JS gets it as `SLOTS`); ONE async scan of all channels,
   then join the strongest saved network by channel + BSSID (the user asked
-  explicitly not to try the networks one by one). No scanning while connected
+  explicitly not to try the networks one by one). Exception at power-on: >= 2
+  saved networks in range → `W_CHOOSE`, display menu (strongest first, auto
+  join of the strongest after 10 s unless the encoder was turned); only until
+  the first join, re-joins later are automatic. No scanning while connected
   unless the web page asks. `setAutoReconnect(false)`; own re-join logic.
 - Web: basic auth `admin` / webPass; clients of the own AP skip auth (the AP
   already needs the same WPA2 password, and captive-portal windows cannot do

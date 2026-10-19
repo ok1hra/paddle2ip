@@ -18,7 +18,9 @@
 // so it works for the paddle, the test message and the straight key.
 //
 // Sidetone: LEDC runs permanently at the chosen frequency; keying only switches
-// the duty between 0 and vol % (no M5.Speaker, it buffers audio).
+// the duty between 0 and the volume duty (no M5.Speaker, it buffers audio).
+// The tone's fundamental is proportional to sin(pi * duty), maximum at 50 %, so
+// vol 1-100 maps linearly in dB to the amplitude and the duty is its inverse.
 #include "shared.h"
 #include "rkey_proto.h"
 #include "driver/gpio.h"
@@ -26,7 +28,8 @@
 
 static const uint8_t LEDC_CH_BUZZ = 0;
 static const uint8_t LEDC_CH_HP   = 1;          // same LEDC timer as CH_BUZZ
-static const uint8_t LEDC_BITS    = 10;
+static const uint8_t LEDC_BITS    = 14;          // 80 MHz / 2^14 = 4.9 kHz > TONE_MAX
+static const float   VOL_RANGE_DB = 40.0f;       // vol 100 = 0 dB, each step of 5 = 2 dB
 
 // ---------------- edge ring (keyer -> net) ----------------
 #define EDGE_RING 32                             // power of two, >= RKEY_MAX_EV
@@ -38,8 +41,14 @@ static uint32_t lastEdgeUs = 0;
 static volatile bool keyDown = false;
 static TaskHandle_t netTask = nullptr;
 
+static uint32_t vol_duty(uint8_t vol) {
+  if (!vol) return 0;
+  float a = powf(10.0f, (vol - 100) * VOL_RANGE_DB / (100 * 20.0f));   // amplitude 0..1
+  return (uint32_t)(asinf(a) / (float)M_PI * ((1u << LEDC_BITS) - 1) + 0.5f);
+}
+
 static void sidetone(bool on) {
-  uint32_t duty = on ? ((uint32_t)g_set.vol * ((1u << LEDC_BITS) - 1)) / 100 : 0;
+  uint32_t duty = on ? vol_duty(g_set.vol) : 0;
   ledcWrite(LEDC_CH_BUZZ, duty);
   if (g_set.hpEnable) ledcWrite(LEDC_CH_HP, duty);
 }

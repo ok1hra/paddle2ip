@@ -1,9 +1,11 @@
-// wlan.cpp — WiFi: up to 3 saved networks, setup AP with captive portal.
+// wlan.cpp — WiFi: up to 4 saved networks, setup AP with captive portal.
 //
 // Joining: ONE asynchronous scan of all channels (~1.5 s), then the strongest
 // saved network in the air is joined directly by channel + BSSID. No slot is
 // "tried" blindly, so a missing network costs nothing. A dropped link is
 // first re-joined on the same AP for 6 s, then a new scan picks the best one.
+// After power-on, when that scan finds two or more saved networks, the join
+// waits in W_CHOOSE until the display menu picks one (wlan_connect).
 //
 // AP: in setup mode (button at boot / nothing saved) Paddle2IP runs AP+STA:
 // the AP serves the web page, a DNS server answers every name with the AP
@@ -17,7 +19,7 @@
 #include <WiFi.h>
 #include <DNSServer.h>
 
-enum WState : uint8_t { W_IDLE, W_SCAN, W_CONNECTING, W_RETRY, W_CONNECTED, W_WAIT };
+enum WState : uint8_t { W_IDLE, W_SCAN, W_CONNECTING, W_RETRY, W_CONNECTED, W_WAIT, W_CHOOSE };
 static WState   st = W_IDLE;
 static uint32_t stMs = 0;              // entered current state
 static uint32_t waitMs = 0;            // W_WAIT duration
@@ -30,6 +32,7 @@ static DNSServer dns;
 static bool     scanForJoin = false;   // current scan should end in a join
 static int8_t   joinSlot = -1;         // -1 = best saved
 static bool     joinRequested = false; // explicit request (setup menu)
+static bool     bootChoice = false;    // until the first join: >= 2 saved in range -> W_CHOOSE
 static char     statusText[48] = "";
 
 #define MAX_NETS 20
@@ -45,6 +48,7 @@ bool        wlan_ap_on() { return apOn; }
 const char* wlan_ap_name() { return apName; }
 const char* wlan_status() { return statusText; }
 bool        wlan_scanning() { return st == W_SCAN; }
+bool        wlan_choosing() { return st == W_CHOOSE; }
 bool        wlan_is_ap_client(IPAddress local) { return apOn && local == WiFi.softAPIP(); }
 
 uint8_t wlan_nets(WlanNet* out, uint8_t max) {
@@ -88,7 +92,7 @@ static void scan_start(bool join) {
 
 bool wlan_scan_start() {
   if (st == W_SCAN) return true;
-  if (st == W_CONNECTING || st == W_RETRY) return false;
+  if (st == W_CONNECTING || st == W_RETRY || st == W_CHOOSE) return false;
   scan_start(false);
   return st == W_SCAN;
 }
@@ -116,6 +120,19 @@ static void scan_collect() {
     for (int j = i; j > 0 && nets[j].rssi > nets[j - 1].rssi; j--) { WlanNet t = nets[j]; nets[j] = nets[j - 1]; nets[j - 1] = t; }
 }
 
+// Saved networks of the last scan, strongest first (a duplicate SSID: the lower slot).
+static uint8_t saved_in_range(int8_t* slot, int8_t* rssi, uint8_t max) {
+  uint8_t n = 0;
+  for (int i = 0; i < nNets && n < max; i++)
+    for (int k = 0; k < WIFI_SLOTS; k++)
+      if (g_set.ssid[k][0] && !strcmp(g_set.ssid[k], nets[i].ssid)) { slot[n] = k; rssi[n++] = nets[i].rssi; break; }
+  return n;
+}
+
+uint8_t wlan_choices(int8_t* slot, int8_t* rssi, uint8_t max) {
+  return st == W_CHOOSE ? saved_in_range(slot, rssi, max) : 0;
+}
+
 // Join the strongest saved network of the last scan (or only joinSlot).
 static bool join_best() {
   for (int i = 0; i < nNets; i++) {
@@ -138,6 +155,11 @@ void wlan_connect(int8_t slot) {
   if (slot >= 0 && (slot >= WIFI_SLOTS || !g_set.ssid[slot][0])) return;
   joinSlot = slot;
   joinRequested = true;
+  bootChoice = false;
+  if (st == W_CHOOSE) {                               // menu answer: the scan is seconds old
+    if (!join_best()) { joinRequested = false; set_state(W_WAIT); waitMs = 1000; }
+    return;
+  }
   if (st == W_SCAN) { scanForJoin = true; return; }   // join when the running scan ends
   WiFi.disconnect(false);
   scan_start(true);
@@ -158,6 +180,7 @@ void wlan_begin(bool setup) {
     scan_start(false);                            // network list for the web page and the menu
     strlcpy(statusText, "setup", sizeof(statusText));
   } else {
+    bootChoice = true;
     scan_start(true);
   }
   staDownMs = millis();
@@ -176,6 +199,14 @@ void wlan_service() {
       }
       scan_collect();
       if (up) { set_state(W_CONNECTED); break; }  // list refresh while connected
+      if (scanForJoin && bootChoice && !joinRequested) {
+        int8_t sl[WIFI_SLOTS], rs[WIFI_SLOTS];
+        if (saved_in_range(sl, rs, WIFI_SLOTS) >= 2) {
+          set_state(W_CHOOSE);
+          strlcpy(statusText, "choose WiFi", sizeof(statusText));
+          break;
+        }
+      }
       if (scanForJoin && join_best()) break;
       if (joinRequested) joinRequested = false;
       set_state(W_WAIT);
@@ -186,6 +217,7 @@ void wlan_service() {
     case W_CONNECTING:
       if (up) {
         set_state(W_CONNECTED);
+        bootChoice = false;
         snprintf(statusText, sizeof(statusText), "%.24s", WiFi.SSID().c_str());
         if (setupMode && joinRequested) { setupMode = false; apIdleMs = ms; }   // leave setup
         joinRequested = false;
@@ -212,6 +244,10 @@ void wlan_service() {
 
     case W_WAIT:
       if (ms - stMs >= waitMs) set_state(W_IDLE);
+      break;
+
+    case W_CHOOSE:                                // waits for wlan_connect()
+      staDownMs = ms;                             // no fallback AP while the menu is up
       break;
 
     case W_IDLE:
