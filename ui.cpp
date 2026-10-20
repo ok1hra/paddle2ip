@@ -506,7 +506,7 @@ static void ui_task(void*) {
       else { func = (Func)((func + 1) % F_COUNT); funcMs = ms; }
       drawMs = 0;
     }
-    if (s) {
+    if (s && !infoPage) {                         // service page: turns would change hidden values
       if (setup) {
         int8_t slotOf[WIFI_SLOTS + 1];
         menuSel = clampi(menuSel + s, 0, menu_items(slotOf) - 1);

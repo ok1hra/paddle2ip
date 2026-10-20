@@ -12,7 +12,7 @@ Supported servers:
 | Server | Device | Notes |
 |---|---|---|
 | **Open Interface III (OI3)**, https://github.com/ok1hra/oi3 | OI3 interface board (ATmega2560 + W5500), keys the CW line through its PTT sequencer (`rkey.ino`) | reference implementation |
-| **WIFILT**, https://github.com/ok1hra/wifilt | web interface for Icom LAN transceivers (ESP32, or a native program on a PC) | support not published yet (uncommitted change in WIFILT) |
+| **WIFILT**, https://github.com/ok1hra/wifilt | web interface for Icom LAN transceivers (ESP32, or a native program on a PC) | implemented and tested; keys TRX1 either through the radio's own keyer (CI-V text, no cable, one character late) or through the KEY output of the interface box (cable to the key jack, the operator's own timing). Setup: WIFILT [SOFTWARE.md, 9.8 Remote CW key](https://github.com/ok1hra/wifilt/blob/main/SOFTWARE.md#98-remote-cw-key) |
 
 Any other device can be a server; see [Implementing a server](#implementing-a-server).
 
@@ -42,8 +42,9 @@ paddle ─► Paddle2IP: iambic keyer ─► sidetone (buzzer / headphones, 0 ms
    address (port 5690) and the shared key — *Generate new key* shows a
    `[RkeyKey=...]` line for the server. *Save*.
 4. **Server**: OI3 — put `[RkeyEnable=1]` and the same `[RkeyKey=...]` in
-   `oi3.cfg` on the SD card and restart it. WIFILT — set the same shared key
-   as described in the WIFILT documentation.
+   `oi3.cfg` on the SD card and restart it. WIFILT — SETUP → *Remote CW key*:
+   *Accept a Paddle2IP* on, choose *Keying*, paste the same key (the whole
+   `[RkeyKey=...]` line works too), *Save & Restart*.
 5. **Key**: the ring turns green when the server answers. Turn the knob for
    WPM, a short press selects the next function (tone, volume, delay, iambic
    A/B, rotation, test, monitor, info), a long press shows the service page.
@@ -54,6 +55,9 @@ Details: [First setup](#first-setup), [Operation](#operation).
 
 - [Quick start](#quick-start)
 - [Hardware](#hardware)
+  - [Ports A and B](#ports-a-and-b)
+  - [Paddle wiring (Port B)](#paddle-wiring-port-b)
+  - [Straight key and headphones (Port A, optional)](#straight-key-and-headphones-port-a-optional)
 - [Build and flash](#build-and-flash)
 - [First setup](#first-setup)
 - [Operation](#operation)
@@ -73,16 +77,86 @@ Details: [First setup](#first-setup), [Operation](#operation).
 
 | What | Where | Notes |
 |---|---|---|
-| Paddle dit | Port B **G2** | paddle common to GND; internal pull-up |
-| Paddle dah | Port B **G1** | swap on the web page if needed |
-| Paddle filter | at the connector | 100 Ω in series with each contact, 10 nF to GND |
-| Straight key (optional) | Port A **G13** | to GND, enable on the web page |
-| Headphone tone (optional) | Port A **G15** | PWM square wave: RC low-pass + series resistor, enable on the web page |
+| Paddle dit | Port B **G2** (pin 2, white) | paddle common to GND; internal pull-up |
+| Paddle dah | Port B **G1** (pin 1, yellow) | swap on the web page if needed |
+| Paddle filter | at the connector | 100 Ω in series with each contact, 10 nF to GND, see [Paddle wiring](#paddle-wiring-port-b) |
+| Straight key (optional) | Port A **G13** (pin 2, white) | to GND, enable on the web page |
+| Headphone tone (optional) | Port A **G15** (pin 1, yellow) | PWM square wave: RC low-pass + series resistor, enable on the web page, see [Straight key and headphones](#straight-key-and-headphones-port-a-optional) |
 | Sidetone | internal buzzer G3 | LEDC square wave at the tone frequency; volume 0–100 is mapped to the duty (max 50 %) so that every step of 5 is 2 dB (0 = off) |
 | Encoder / button | G40/G41, G42 | |
 
 **Do not connect the red 5 V wire** of the Grove cable to the paddle.
 The Dial keeps itself powered from the battery (HOLD = GPIO46, set by `M5Dial.begin()`).
+
+### Ports A and B
+
+Both ports are Grove (HY2.0-4P, 2.0 mm pitch) sockets. Pin order of the
+plug, the same on both ports:
+
+```
+         Port B  (paddle)                    Port A  (optional)
+   ┌──────┬──────┬──────┬──────┐       ┌──────┬──────┬──────┬──────┐
+   │  1   │  2   │  3   │  4   │       │  1   │  2   │  3   │  4   │
+   │  G1  │  G2  │  5V  │ GND  │       │ G15  │ G13  │  5V  │ GND  │
+   └──────┴──────┴──────┴──────┘       └──────┴──────┴──────┴──────┘
+    yellow white   red   black          yellow white   red   black
+     dah    dit    n.c. common          phones  str.   n.c.  GND
+                                        tone    key
+```
+
+The wire colours are those of the standard Grove cable; check them on yours
+with a multimeter (pin 4 = GND = the metal shell of the USB-C connector).
+On Port A the I²C names are SCL = G15 (pin 1) and SDA = G13 (pin 2); the
+firmware does not use I²C there.
+
+### Paddle wiring (Port B)
+
+```
+ paddle jack 3.5 mm                          Dial Port B
+                                             pin  wire    GPIO
+ tip     dit ───[100 Ω]──────────┬────────── 2    white   G2
+                                ═╧═
+                                ═╤═ 10 nF
+ sleeve  common ─────────────────┼────────── 4    black   GND
+                                ═╧═
+                                ═╤═ 10 nF
+ ring    dah ───[100 Ω]──────────┴────────── 1    yellow  G1
+
+                                             3    red     5 V  not connected
+```
+
+- Contacts close to GND; G1/G2 have the ESP32 internal pull-ups, no
+  external resistor to 3.3 V is needed.
+- The 100 Ω + 10 nF filter (at the Dial end of the cable) keeps RF and
+  contact bounce out of the GPIOs. Without it the paddle works too, but put it
+  there near a transmitter.
+- Tip = dit, ring = dah is the usual jack wiring; if your paddle is wired the
+  other way round, set *paddle swap* on the web page instead of rewiring.
+
+### Straight key and headphones (Port A, optional)
+
+```
+ straight key                                Dial Port A
+                                             pin  wire    GPIO
+ key ───────────[100 Ω]──────────┬────────── 2    white   G13  (enable "straight key")
+                                ═╧═
+                                ═╤═ 10 nF
+ key common ─────────────────────┴────────── 4    black   GND
+
+ headphones 3.5 mm (example values)          pin  wire    GPIO
+ tip + ring ───┤├+───[470 Ω]───┬──[1 kΩ]──── 1    yellow  G15  (enable "headphone tone")
+              10 µF           ═╧═
+                              ═╤═ 100 nF
+ sleeve ───────────────────────┴──────────── 4    black   GND
+```
+
+- The straight key closes to GND like the paddle (internal pull-up) and keys
+  with its own timing; it works only when enabled on the web page.
+- G15 gives the same square wave as the buzzer, keyed together with it, with
+  the same volume setting. 1 kΩ + 100 nF is a low-pass (≈ 1.6 kHz) that rounds
+  it off, the 10 µF capacitor (+ towards the Dial) blocks the DC, 470 Ω sets
+  the level for 32 Ω headphones (larger value = quieter). Both earpieces in
+  parallel (tip and ring together), so the tone is in both ears.
 
 ## Build and flash
 
@@ -143,8 +217,13 @@ survive unless the user chooses erase.
    *Generate new key* and copy the shown `[RkeyKey=...]` line into `oi3.cfg`
    on the OI3 SD card. The key can be shown again later on the page (eye
    button) or with the serial command `key`.
-6. On the OI3 set `[RkeyEnable=1]` and the same `RkeyKey`, restart it. A WIFILT
-   gets the same key; see the WIFILT documentation.
+6. On the OI3 set `[RkeyEnable=1]` and the same `RkeyKey`, restart it. On a
+   WIFILT open SETUP → *Remote CW key*: *Accept a Paddle2IP* on, *Keying*
+   *Radio keyer* (CI-V text, no cable) or *KEY output* (cable from the box's
+   KEY jack to the radio's key jack set to a straight key, BK-IN on), UDP port
+   5690, the same *Shared key* (or press *Generate* there and paste its key
+   into Paddle2IP), *Save & Restart*. Details in WIFILT
+   [SOFTWARE.md, 9.8](https://github.com/ok1hra/wifilt/blob/main/SOFTWARE.md#98-remote-cw-key).
 7. *Save*. Paddle2IP reboots, joins the strongest saved network and connects.
    The ring turns green when the server answers.
 
@@ -166,7 +245,7 @@ survive unless the user chooses erase.
 |---|---|
 | ring | **red** edge with a long fade to black towards the centre = TX on the server (PTT sequencer up, the whole over, not each element); dark green = live link (the server answers our session); grey = no link |
 | top | rig frequency `14 023.75` (MHz kHz.Hz/10, from the server; `-- ---.--` = unknown). The sequencer level n colours the last n digits red (0 = none, 5 = five digits) |
-| centre | big value of the selected function: WPM in white, the others in yellow with their name below (`TONE Hz`, `VOLUME %`, `DELAY ms`, …). *Monitor* shows `CONN`/`DISC` and the element trace instead |
+| centre | big value of the selected function with its name below: WPM in white (`WPM`), the others in yellow (`TONE Hz`, `VOLUME %` / `VOLUME (off)`, `DELAY ms` / `DELAY (server)`, `IAMBIC`, `ROTATE (deg)`, `TEST` with `turn = send` / `sending...`). *Monitor* shows `CONN`/`DISC` and the element trace instead |
 | left of centre | WiFi signal, vertical bargraph of 4 segments (bottom = weakest) |
 | right of centre | WiFi signal in dBm; below it the packet loss `up/down %` (up = Paddle2IP → server as reported by the server, down = server → Paddle2IP; `-` = not known yet) |
 | warning line | the first applicable warning, see below; empty when all is well |
@@ -175,8 +254,9 @@ survive unless the user chooses erase.
 While the fallback AP is up and no WiFi network is joined (see
 [Setup mode](#setup-mode)), the top shows the AP name `AP Paddle2IP-XXXX` and
 its password, the bottom the page address `http://192.168.4.1` and the WiFi
-status (`scanning...`, `no saved WiFi in range`, `joining …`); the signal and
-the bottom line are hidden. The centre and the encoder work as usual.
+status (`scanning...`, `no saved WiFi in range`, `joining <SSID>`,
+`<SSID> failed`, `reconnecting`); the signal, the warning line and the bottom
+line are hidden. The centre and the encoder work as usual.
 
 WiFi signal colour: green ≥ −65 dBm, orange −65 … −75 dBm (at the edge), red
 below −75 dBm (drop-outs likely). Thresholds: `RSSI_GOOD` / `RSSI_EDGE` in `shared.h`.
@@ -186,7 +266,7 @@ shows the same values with a legend):
 
 | Field | Example | Meaning | Values |
 |---|---|---|---|
-| `R` last/min | `R4/3` | round-trip time to the server in ms: the last one / the minimum of the last ~5 s. `R--` = no measurement (no link) | LAN 1–10, internet 20–100, LTE 50–200+. *last* far above *min* = jitter, D must cover it |
+| `R` last/min | `R4/3` | round-trip time to the server in ms: the last one / the minimum of the last ~5 s. Without a link the line is only `R-- D<your D>`, no `L` | LAN 1–10, internet 20–100, LTE 50–200+. *last* far above *min* = jitter, D must cover it |
 | `D` | `D120` | playout delay in ms the server uses: your *Delay D*, or the server default `RkeyDelayMs` when D = 0. The server may raise it after late edges and on the first element of an over | see [Choosing the playout delay](#choosing-the-playout-delay) |
 | `L` lost/late | `L0/391` | server edge counters since the server (OI3) started, 0…65535 | **lost** = edges never received (a drop-out longer than the redundancy of 500 ms / 8 edges): should stay 0, growing = bad WiFi/link. **late** = edges that arrived after their playout time, the rest of the over was shifted: growing while you key = D too small |
 
@@ -196,7 +276,7 @@ Warnings, in order of priority (only the first one is shown):
 |---|---|
 | `NO KEY` | no shared key configured |
 | `NO WIFI` | not connected to a WiFi network |
-| `NO SERVER` | no server address, or the host name does not resolve |
+| `NO SERVER` | no server address, or the host name has not resolved yet (after a failed DNS lookup the last known address stays in use) |
 | `NO LINK` | no STATUS from the server for 1 s |
 | `SYNC` (orange) | the server refused a stale nonce; resolves itself with the next STATUS |
 | `INTERLOCK` | PA interlock active on the server, keying blocked |
@@ -217,7 +297,8 @@ without a network). It returns to WPM 60 s after the last change.
 
 #### Service page
 
-Long press, from any screen; a short or long press closes it.
+Long press, from any screen; a short or long press closes it. Turning the
+encoder does nothing while it is shown.
 
 | Line | Content |
 |---|---|
@@ -269,12 +350,12 @@ Functions (one detent = one step; the display returns to WPM 20 s after the last
 |---|---|---|
 | WPM | 5–60 | 1 |
 | Tone | 300–1200 Hz | 10 Hz |
-| Volume | 0 (off) – 50 % (buzzer duty) | 5 % |
-| Delay D | 0 (= server default) or 10–1000 ms | 10 ms |
+| Volume | 0 (off) – 100 (100 = buzzer duty 50 %, the loudest) | 5 = 2 dB |
+| Delay D | 0 (= server default; the centre then shows the D the server uses, `DELAY (server)`) or 10–1000 ms | 10 ms |
 | Iambic | A / B | toggle |
 | Rotate | 0 / 180° | toggle |
 | Test | turn = send `TEST` at the set WPM (keys the rig like the paddle; a paddle aborts it) | – |
-| Monitor | line 1 `CONN` (green, server answers our session) / `DISC` (red); line 2 the sent elements, e.g. `-.-. --.- / -.-`, newest on the right; turn = clear (stays until the next press) | – |
+| Monitor | line 1 `CONN` (green, server answers our session and accepts our nonce) / `DISC` (red); line 2 the last 14 characters of the sent elements, e.g. `-.-. --.- / -.-`, newest on the right (letter gap ≥ 2 dits = space, word gap ≥ 5 dits = ` / `); turn = clear (stays until the next press) | – |
 | Info | FW revision, QR code + text of the GitHub URL, own IP address (`AP 192.168.4.1` when only the AP runs) (stays 60 s) | – |
 
 Values are saved to flash 3 s after the last change, but only after the keyer
@@ -353,8 +434,10 @@ raises D by itself (`L` late counter on the display). Start with:
 | good internet / VPN | 80–150 ms |
 | LTE | 200 ms and more |
 
-D = 0 uses the server's default (OI3 `RkeyDelayMs`). The OI3 also raises D on
-the first element of an over to cover its PTT sequencer lead times.
+D = 0 uses the server's default (OI3 `RkeyDelayMs`, WIFILT *Playout delay ms*).
+The OI3 also raises D on the first element of an over to cover its PTT
+sequencer lead times. With the WIFILT *Radio keyer* D does not apply: the
+radio's keyer sends each character once its letter gap has passed.
 
 ### Access from the internet (NAT)
 
