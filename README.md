@@ -47,7 +47,7 @@ paddle ─► Paddle2IP: iambic keyer ─► sidetone (buzzer / headphones, 0 ms
    `[RkeyKey=...]` line works too), *Save & Restart*.
 5. **Key**: the ring turns green when the server answers. Turn the knob for
    WPM, a short press selects the next function (tone, volume, delay, iambic
-   A/B, rotation, test, monitor, info), a long press shows the service page.
+   A/B, rotation, test, info), a long press shows the service page.
 
 Details: [First setup](#first-setup), [Operation](#operation).
 
@@ -243,25 +243,25 @@ survive unless the user chooses erase.
 
 | Area | Content |
 |---|---|
-| ring | **red** edge with a long fade to black towards the centre = TX on the server (PTT sequencer up, the whole over, not each element); dark green = live link (the server answers our session); grey = no link |
-| top | rig frequency `14 023.75` (MHz kHz.Hz/10, from the server; `-- ---.--` = unknown). The sequencer level n colours the last n digits red (0 = none, 5 = five digits) |
-| centre | big value of the selected function with its name below: WPM in white (`WPM`), the others in yellow (`TONE Hz`, `VOLUME %` / `VOLUME (off)`, `DELAY ms` / `DELAY (server)`, `IAMBIC`, `ROTATE (deg)`, `TEST` with `turn = send` / `sending...`). *Monitor* shows `CONN`/`DISC` and the element trace instead |
+| ring | **red** edge with a fade to black towards the centre = TX on the server (PTT sequencer up, the whole over, not each element); dark green = live link (the server answers our session); grey = no link |
+| top | rig frequency `14 023.75` (MHz kHz.Hz/10, from the server; `-- ---.--` = unknown). The sequencer level n turns the last n digits light grey (0 = none, 5 = five digits) |
+| centre | big value of the selected function with its name below: WPM in white (`WPM`), the others in yellow (`TONE Hz`, `VOLUME %` / `VOLUME (off)`, `DELAY ms` / `DELAY (server)`, `IAMBIC`, `ROTATE (deg)`, `TEST` with `turn = send` / `sending...`) |
 | left of centre | WiFi signal, vertical bargraph of 4 segments (bottom = weakest) |
 | right of centre | WiFi signal in dBm; below it the packet loss `up/down %` (up = Paddle2IP → server as reported by the server, down = server → Paddle2IP; `-` = not known yet) |
-| warning line | the first applicable warning, see below; empty when all is well |
-| bottom | `R4/3 D120 L0/391`, see below |
+| status line | `R4/3 D120 L0/391`, see below |
+| bottom | the first applicable warning, see below. Without a warning, while you key (until 10 s after the last element), the last 13 characters of the sent elements, e.g. `-.-. --.- / -.-`, newest on the right (letter gap ≥ 2 dits = space, word gap ≥ 5 dits = ` / `). It shows what Paddle2IP sent, not what the server keyed |
 
 While the fallback AP is up and no WiFi network is joined (see
 [Setup mode](#setup-mode)), the top shows the AP name `AP Paddle2IP-XXXX` and
 its password, the bottom the page address `http://192.168.4.1` and the WiFi
 status (`scanning...`, `no saved WiFi in range`, `joining <SSID>`,
-`<SSID> failed`, `reconnecting`); the signal, the warning line and the bottom
-line are hidden. The centre and the encoder work as usual.
+`<SSID> failed`, `reconnecting`); the signal, the status line and the
+warnings are hidden. The centre and the encoder work as usual.
 
 WiFi signal colour: green ≥ −65 dBm, orange −65 … −75 dBm (at the edge), red
 below −75 dBm (drop-outs likely). Thresholds: `RSSI_GOOD` / `RSSI_EDGE` in `shared.h`.
 
-Bottom line, e.g. `R4/3 D120 L0/391` (the [service page](#service-page)
+Status line, e.g. `R4/3 D120 L0/391` (the [service page](#service-page)
 shows the same values with a legend):
 
 | Field | Example | Meaning | Values |
@@ -309,7 +309,7 @@ encoder does nothing while it is shown.
 | `sessID XXXX tx N` | session id of this boot and the number of packets sent |
 | `bad tag N \| B key swap` | STATUS packets with a wrong authentication tag (wrong key or spoofing), iambic mode A/B, `swap` = paddles swapped |
 | `login admin / <password>` | web page login |
-| legend | the main screen bottom line with its current values: `R 4/3 RTT last/min ms`, `D 120 playout delay ms`, `L 0/391 lost/late edges` (see [Main screen](#main-screen)) |
+| legend | the main screen status line with its current values: `R 4/3 RTT last/min ms`, `D 120 playout delay ms`, `L 0/391 lost/late edges` (see [Main screen](#main-screen)) |
 
 #### Setup screen
 
@@ -355,7 +355,6 @@ Functions (one detent = one step; the display returns to WPM 20 s after the last
 | Iambic | A / B | toggle |
 | Rotate | 0 / 180° | toggle |
 | Test | turn = send `TEST` at the set WPM (keys the rig like the paddle; a paddle aborts it) | – |
-| Monitor | line 1 `CONN` (green, server answers our session and accepts our nonce) / `DISC` (red); line 2 the last 14 characters of the sent elements, e.g. `-.-. --.- / -.-`, newest on the right (letter gap ≥ 2 dits = space, word gap ≥ 5 dits = ` / `); turn = clear (stays until the next press) | – |
 | Info | FW revision, QR code + text of the GitHub URL, own IP address (`AP 192.168.4.1` when only the AP runs) (stays 60 s) | – |
 
 Values are saved to flash 3 s after the last change, but only after the keyer

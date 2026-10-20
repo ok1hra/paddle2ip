@@ -2,10 +2,11 @@
 //
 // Key screen: encoder (PCNT, x4 quadrature) = 1 step of the selected function
 // per detent. Short press: next function (WPM / tone / volume / delay D /
-// iambic A-B / display rotation / test: turn = send "TEST" / monitor: link
-// CONN/DISC + trace of the sent elements, turn = clear / info: FW revision,
+// iambic A-B / display rotation / test: turn = send "TEST" / info: FW revision,
 // GitHub QR code + own IP); the display falls back to WPM FUNC_HOLD_MS after
-// the last change (info: INFO_HOLD_MS, monitor: stays).
+// the last change (info: INFO_HOLD_MS).
+// While keying, the bottom line shows the trace of the sent elements unless
+// a warning takes it.
 // With the fallback AP up and no WiFi the main screen shows the AP name,
 // password, page URL and WiFi status instead of frequency / warning / link.
 // Setup screen (AP mode): encoder selects a saved network or "best in range",
@@ -13,7 +14,7 @@
 // Choose screen (power-on, >= 2 saved networks in range): encoder selects,
 // short press joins; untouched for CHOOSE_AUTO_MS it joins the strongest.
 // Long press (both): service page (IP, RSSI, server, counters, legend of the
-// main screen bottom line).
+// main screen status line).
 #include "shared.h"
 #include "rkey_proto.h"
 #include <M5Dial.h>
@@ -25,7 +26,7 @@ void web_begin();
 void web_loop();
 bool web_take_peer_changed();
 
-enum Func : uint8_t { F_WPM, F_TONE, F_VOL, F_DELAY, F_MODE, F_ROT, F_SEND, F_MON, F_INFO, F_COUNT };
+enum Func : uint8_t { F_WPM, F_TONE, F_VOL, F_DELAY, F_MODE, F_ROT, F_SEND, F_INFO, F_COUNT };
 static Func     func = F_WPM;
 static uint32_t funcMs = 0;
 static bool     infoPage = false;
@@ -34,6 +35,7 @@ static uint32_t dirtyMs = 0;
 static int8_t   menuSel = 0;                     // setup menu: 0 = best in range, 1.. = saved slots
 static const uint32_t FUNC_HOLD_MS = 20000;      // back to WPM after the last change
 static const uint32_t INFO_HOLD_MS = 60000;
+static const uint32_t TRACE_HOLD_US = 10000000;  // trace shown until 10 s after the last edge
 static int8_t   chooseSel = 0;                   // choose menu, 0 = strongest
 static bool     chooseHold = false;              // encoder turned: no automatic join
 static uint32_t chooseMs = 0;
@@ -84,7 +86,6 @@ static void apply_steps(int s) {
   funcMs = millis();
   if (func == F_INFO) return;                    // nothing to change
   if (func == F_SEND) { keyer_send_test(); return; }   // either direction
-  if (func == F_MON)  { keyer_trace_clear(); return; }
   switch (func) {
     case F_WPM:  g_set.wpm = clampi(g_set.wpm + s, WPM_MIN, WPM_MAX); break;
     case F_TONE: g_set.toneHz = clampi(g_set.toneHz + 10 * s, TONE_MIN, TONE_MAX); keyer_set_tone(g_set.toneHz); break;
@@ -191,9 +192,9 @@ template <class G> static void draw_signal(G& g, const LinkState& L) {
   draw_halo(g, loss, 198, 129, TFT_LIGHTGREY);
 }
 
-// TX: solid red edge RING_TX_IN..119, then a long linear fade to black down to
+// TX: solid red edge RING_TX_IN..119, then a linear fade to black down to
 // RING_FADE_IN (linear RGB565 already looks smooth through the panel gamma)
-static const int RING_TX_IN = 112, RING_FADE_IN = 62;
+static const int RING_TX_IN = 116, RING_FADE_IN = 91;
 
 template <class G> static void draw_ring(G& g, const LinkState& L) {
   // red for the whole over (OI3 sequencer up), not blinking with every element
@@ -259,7 +260,7 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
     snprintf(p, sizeof(p), "pass %s", g_set.webPass);
     draw_fit(g, p, 50, 176, TFT_WHITE);
   } else if (L.fresh && (L.flags & RKEY_SF_CIV_VALID) && L.freqHz) {
-    // rig frequency "14 023.75"; sequencer level n colours the last n digits
+    // rig frequency "14 023.75"; sequencer level n turns the last n digits grey
     snprintf(s, sizeof(s), "%lu %03lu.%02lu", (unsigned long)(L.freqHz / 1000000UL),
              (unsigned long)((L.freqHz / 1000UL) % 1000UL), (unsigned long)((L.freqHz % 1000UL) / 10UL));
     int x = 120 - g.textWidth(s) / 2;
@@ -269,7 +270,7 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
     for (const char* p = s; *p; p++) {
       char c[2] = { *p, 0 };
       bool digit = (*p != ' ' && *p != '.');
-      draw_halo(g, c, x, 50, digit && left <= L.seqLevel ? TFT_RED : TFT_WHITE);   // on the TX glow
+      draw_halo(g, c, x, 50, digit && left <= L.seqLevel ? TFT_LIGHTGREY : TFT_WHITE);   // on the TX glow
       if (digit) left--;
       x += g.textWidth(c);
     }
@@ -291,7 +292,6 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
     case F_MODE:  label = "IAMBIC"; num = false; txt[0] = g_set.mode; txt[1] = 0; break;
     case F_SEND:  label = keyer_msg_active() ? "sending..." : "turn = send"; num = false; strcpy(txt, "TEST"); break;
     case F_ROT:   label = "ROTATE (deg)"; val = g_set.rot180 ? 180 : 0; break;
-    case F_MON:   num = false; break;
     default: break;
   }
   g.setTextColor(func == F_WPM ? TFT_WHITE : TFT_YELLOW);
@@ -304,28 +304,10 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
     snprintf(s, sizeof(s), "%s", txt);
     fit_size(g, s, 1.4f);
   }
-  if (func == F_MON) {
-    // line 1: link state, line 2: trace of the sent elements (newest right)
-    bool conn = L.fresh && L.sessionOk && !(L.flags & RKEY_SF_NONCE_BAD);
-    g.setFont(&fonts::FreeSansBold24pt7b);
-    fit_size(g, conn ? "CONN" : "DISC", 1.2f);
-    g.setTextColor(conn ? TFT_GREEN : TFT_RED);
-    g.drawString(conn ? "CONN" : "DISC", 120, 112);
-    g.setTextSize(1);
-    g.setFont(&fonts::FreeMonoBold12pt7b);
-    g.setTextColor(TFT_WHITE);
-    char tr[24];
-    keyer_trace(tr, 14);                         // 14 x 14 px fits the round panel here
-    g.setTextDatum(middle_right);
-    g.drawString(tr, 218, 155);
-    g.setTextDatum(middle_center);
-  } else {
-    g.drawString(s, 120, 119);
-    g.setTextSize(1);
-    g.setFont(&fonts::Font2);
-    g.drawString(label, 120, 162);
-  }
+  g.drawString(s, 120, 119);
   g.setTextSize(1);
+  g.setFont(&fonts::Font2);
+  g.drawString(label, 120, 162);
 
   if (ap) {
     snprintf(s, sizeof(s), "http://%s", WiFi.softAPIP().toString().c_str());
@@ -334,20 +316,27 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
     return;
   }
 
-  // warning line
-  uint16_t wc;
-  const char* w = warning(L, &wc);
-  if (w) { g.setFont(&fonts::FreeSansBold9pt7b); draw_halo(g, w, 120, 183, wc); }
-
-  // bottom: R = RTT last/min, D = delay, L = OI3 lost/late edges (legend on the service page)
+  // status line: R = RTT last/min, D = delay, L = OI3 lost/late edges (legend on the service page)
   g.setFont(&fonts::Font2);
   if (L.fresh && L.rttUs >= 0)
     snprintf(s, sizeof(s), "R%ld/%ld D%u L%u/%u", (long)(L.rttUs / 1000), (long)(L.rttMinUs / 1000),
              L.delayMs, L.lostEv, L.lateEv);
   else
     snprintf(s, sizeof(s), "R-- D%u", L.fresh ? L.delayMs : g_set.delayMs);
-  draw_halo(g, s, 120, 203, TFT_LIGHTGREY);       // the ends touch the TX ring
+  draw_halo(g, s, 120, 183, TFT_LIGHTGREY);       // may sit on the TX glow
   draw_signal(g, L);
+
+  // bottom: the first warning, else while keying the trace of the sent
+  // elements (newest right; the same edges as the KEY packets, not an echo)
+  uint16_t wc;
+  const char* w = warning(L, &wc);
+  if (w) { g.setFont(&fonts::FreeSansBold9pt7b); draw_halo(g, w, 120, 203, wc); }
+  else if (keyer_idle_us((uint32_t)esp_timer_get_time()) < TRACE_HOLD_US) {
+    char tr[16];
+    keyer_trace(tr, 13);                         // 13 x 11 px fit the round panel at y 203
+    g.setFont(&fonts::FreeMonoBold9pt7b);
+    draw_halo(g, tr, 120, 203, TFT_WHITE);
+  } else keyer_trace_clear();                    // the next over starts on an empty line
 }
 
 template <class G> static void draw_setup(G& g) {
@@ -450,7 +439,7 @@ template <class G> static void draw_info(G& g, const LinkState& L) {
   snprintf(s, sizeof(s), "bad tag %lu | %c key%s", (unsigned long)L.badTag, g_set.mode, g_set.swap ? " swap" : ""); line(s);
   snprintf(s, sizeof(s), "login %s / %s", WEB_USER, g_set.webPass); line(s);
 
-  // legend of the main screen bottom line "R4/3 D120 L0/391", with the values
+  // legend of the main screen status line "R4/3 D120 L0/391", with the values
   g.drawFastHLine(70, 165, 100, 0x4208);
   g.setTextColor(TFT_LIGHTGREY);
   if (L.fresh && L.rttUs >= 0)
@@ -519,7 +508,7 @@ static void ui_task(void*) {
     }
     if (choose && !chooseHold && ms - chooseMs >= CHOOSE_AUTO_MS) choose_join();
     if (func == F_SEND && keyer_msg_active()) funcMs = ms;   // stay while sending
-    if (func != F_WPM && func != F_MON && ms - funcMs > (func == F_INFO ? INFO_HOLD_MS : FUNC_HOLD_MS)) { func = F_WPM; drawMs = 0; }
+    if (func != F_WPM && ms - funcMs > (func == F_INFO ? INFO_HOLD_MS : FUNC_HOLD_MS)) { func = F_WPM; drawMs = 0; }
 
     // NVS write stalls both cores -> only while the keyer has been idle for 2 s
     if (dirty && ms - dirtyMs > 3000 && keyer_idle_us((uint32_t)esp_timer_get_time()) > 2000000u) {

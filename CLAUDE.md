@@ -140,13 +140,20 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
    >= 5 dits " / "). It shows what was SENT, not what the server keyed: the
    protocol has no echo of played edges (that would need a STATUS extension
    in both repos).
+8. After hardware feedback: MONITOR item removed (no new information); the
+   trace is shown in the main screen bottom line while keying (until 10 s
+   after the last edge, then cleared), unless a warning takes the line; the
+   status line R/D/L moved above it. TX ring glow halved (solid 116..119,
+   fade to 91). Sequencer digits light grey instead of red. Web save is
+   post/redirect/get (the browser stayed on /save); reboot / AP restart
+   after a save run from web_loop 1 s later, once the answer is out.
 
 ## Open items
 
 - NOTHING has run on hardware yet. Check: encoder counts per detent, buzzer
   loudness at low duty, sidetone and edge timing under WiFi load, captive
-  portal on Android / iOS, display layout on the round panel (bottom line
-  with RTT > 99 ms may touch the red ring), RSSI thresholds vs. real loss.
+  portal on Android / iOS, display layout on the round panel (trace in the
+  bottom line, 13 chars of FreeMonoBold9pt7b), RSSI thresholds vs. real loss.
 - Choose `RkeyDelayMs` / D on real links (LAN 30, internet 80–150, LTE 200+).
 - OI3 `readSDSettings()` prints the cfg including `RkeyKey` to serial —
   consider masking.

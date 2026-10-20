@@ -9,12 +9,20 @@
 // WiFi and web passwords and the shared key are filled into the form (hidden,
 // an eye button shows them), so the key can be copied into oi3.cfg later.
 // Plain HTTP: the key crosses the local network on every page load (accepted).
+//
+// Save answers with a redirect to the form (post/redirect/get, the result is
+// shown there once), so the browser does not stay on /save. A reboot or an AP
+// restart (new password) waits until the answer has gone out.
 #include "shared.h"
 #include <WiFi.h>
 #include <WebServer.h>
 
 static WebServer server(80);
 static volatile bool peerChanged = false;
+static String   notice;                          // shown once on the next form load
+static uint8_t  later = 0;                       // LATER_* after the answer is sent
+static uint32_t laterMs = 0;
+enum { LATER_NONE, LATER_AP, LATER_REBOOT };
 
 bool web_take_peer_changed() { bool c = peerChanged; peerChanged = false; return c; }
 
@@ -127,7 +135,9 @@ static void handle_root() {
   h += F("<p>"); h += FW_VERSION; h += F(" &middot; ");
   h += WiFi.isConnected() ? ("WiFi " + esc(WiFi.SSID().c_str()) + " " + WiFi.localIP().toString()) : String(F("WiFi not connected"));
   if (wlan_ap_on()) { h += F(" &middot; AP "); h += esc(wlan_ap_name()); }
-  h += F(" &middot; <a href=/status>status</a></p><form method=post action=/save>");
+  h += F(" &middot; <a href=/status>status</a></p>");
+  h += notice; notice = "";
+  h += F("<form method=post action=/save>");
 
   h += F("<fieldset><legend>WiFi networks (the strongest one in range is used)</legend>"
          "<div id=nets>&hellip;</div><button type=button onclick=poll(1)>Scan</button>");
@@ -209,7 +219,7 @@ static bool copy_arg(const char* name, char* dst, size_t n, bool trim) {
 
 static void handle_save() {
   if (!auth()) return;
-  bool reboot = false;
+  bool reboot = false, apRestart = false;
   String v, msg;
 
   for (int i = 0; i < WIFI_SLOTS; i++) {
@@ -247,18 +257,29 @@ static void handle_save() {
   if (server.hasArg("webpass") && v != g_set.webPass) {
     if (v.length() >= 8 && v.length() < sizeof(g_set.webPass)) {
       strlcpy(g_set.webPass, v.c_str(), sizeof(g_set.webPass));
-      if (!reboot) wlan_ap_restart();
+      apRestart = true;
       msg += F("<p>Login password changed.</p>");
     } else msg += F("<p style=color:red>Password ignored: 8-32 chars.</p>");
   }
 
   settings_save();
+  later = reboot ? LATER_REBOOT : apRestart ? LATER_AP : LATER_NONE;
+  laterMs = millis();
+  if (!reboot) {
+    notice = F("<p style=color:green><b>Saved.</b></p>"); notice += msg;
+    server.sendHeader("Location", "/", true);
+    server.send(303, "text/plain", "");
+    return;
+  }
+  // back to the form once Paddle2IP answers again (any HTTP answer, a login
+  // prompt included); a different network may give it another address
   String h = FPSTR(HEAD);
-  h += F("<p>Saved.</p>"); h += msg;
-  h += reboot ? F("<p>Rebooting&hellip; Paddle2IP joins the strongest saved network.</p>") : F("<p><a href=/>Back</a></p>");
-  h += F("</body></html>");
+  h += F("<p style=color:green><b>Saved.</b></p>"); h += msg;
+  h += F("<p>Rebooting&hellip; Paddle2IP joins the strongest saved network, this page returns "
+         "to the settings when it is back (a different network may give it another address).</p>"
+         "<script>function p(){fetch('/status',{cache:'no-store'}).then(function(){location.replace('/')},"
+         "function(){setTimeout(p,2000)})}setTimeout(p,5000)</script></body></html>");
   server.send(200, "text/html", h);
-  if (reboot) { delay(500); ESP.restart(); }
 }
 
 static void handle_genkey() {
@@ -305,4 +326,11 @@ void web_begin() {
   server.begin();
 }
 
-void web_loop() { server.handleClient(); }
+void web_loop() {
+  server.handleClient();
+  if (later && millis() - laterMs > 1000) {      // the answer is out, the socket closed
+    if (later == LATER_REBOOT) ESP.restart();
+    wlan_ap_restart();
+    later = LATER_NONE;
+  }
+}

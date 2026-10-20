@@ -12,7 +12,7 @@
 // Test message: the UI can start "TEST", played with the same ideal timing;
 // any paddle or the straight key aborts it (the current element is finished).
 //
-// Element trace (display "MONITOR"): every key-up appends '.' or '-' by the
+// Element trace (main screen bottom line): every key-up appends '.' or '-' by the
 // mark length (< 2 dits = dot), every key-down after a gap of >= 2 dits a ' '
 // (letter) or after >= 5 dits " / " (word). Same edges as in the KEY packets,
 // so it works for the paddle, the test message and the straight key.
