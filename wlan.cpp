@@ -5,7 +5,9 @@
 // "tried" blindly, so a missing network costs nothing. A dropped link is
 // first re-joined on the same AP for 6 s, then a new scan picks the best one.
 // After power-on, when that scan finds two or more saved networks, the join
-// waits in W_CHOOSE until the display menu picks one (wlan_connect).
+// waits in W_CHOOSE until the display menu picks one (wlan_connect). The USB
+// network, when a computer is on the cable, is one more item of that menu:
+// then even a single saved network (or none) waits for the choice.
 //
 // AP: in setup mode (button at boot / nothing saved) Paddle2IP runs AP+STA:
 // the AP serves the web page, a DNS server answers every name with the AP
@@ -35,6 +37,7 @@ static bool     scanForJoin = false;   // current scan should end in a join
 static int8_t   joinSlot = -1;         // -1 = best saved
 static bool     joinRequested = false; // explicit request (setup menu)
 static bool     bootChoice = false;    // until the first join: >= 2 saved in range -> W_CHOOSE
+static bool     bootDecided = false;   // the power-on scan is through (menu or join)
 static char     statusText[48] = "";
 
 #define MAX_NETS 20
@@ -51,6 +54,7 @@ const char* wlan_ap_name() { return apName; }
 const char* wlan_status() { return statusText; }
 bool        wlan_scanning() { return st == W_SCAN; }
 bool        wlan_choosing() { return st == W_CHOOSE; }
+bool        wlan_boot_decided() { return bootDecided || millis() > 10000; }   // scans failing: don't wait forever
 bool        wlan_is_ap_client(IPAddress local) { return apOn && local == WiFi.softAPIP(); }
 
 uint8_t wlan_nets(WlanNet* out, uint8_t max) {
@@ -159,6 +163,7 @@ void wlan_connect(int8_t slot) {
   joinSlot = slot;
   joinRequested = true;
   bootChoice = false;
+  bootDecided = true;
   if (st == W_CHOOSE) {                               // menu answer: the scan is seconds old
     if (!join_best()) { joinRequested = false; set_state(W_WAIT); waitMs = 1000; }
     return;
@@ -176,6 +181,7 @@ void wlan_suspend(bool off) {
     WiFi.disconnect(false);
     WiFi.mode(WIFI_OFF);
     bootChoice = false;
+    bootDecided = true;
     set_state(W_OFF);
     strlcpy(statusText, "off (USB)", sizeof(statusText));
   } else {
@@ -197,6 +203,7 @@ void wlan_begin(bool setup) {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);                           // no modem sleep: it adds 100+ ms latency
   if (setupMode) {
+    bootDecided = true;                           // no network menu in setup mode
     ap_start();
     scan_start(false);                            // network list for the web page and the menu
     strlcpy(statusText, "setup", sizeof(statusText));
@@ -215,14 +222,15 @@ void wlan_service() {
   switch (st) {
     case W_SCAN:
       if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
-        if (ms - stMs > 8000) { WiFi.scanDelete(); set_state(W_WAIT); waitMs = 1000; }
+        if (ms - stMs > 8000) { WiFi.scanDelete(); set_state(W_WAIT); waitMs = 1000; bootDecided = true; }
         break;
       }
       scan_collect();
       if (up) { set_state(W_CONNECTED); break; }  // list refresh while connected
       if (scanForJoin && bootChoice && !joinRequested) {
         int8_t sl[WIFI_SLOTS], rs[WIFI_SLOTS];
-        if (saved_in_range(sl, rs, WIFI_SLOTS) >= 2) {
+        bootDecided = true;
+        if (saved_in_range(sl, rs, WIFI_SLOTS) >= 2 || usbnet_offered()) {
           set_state(W_CHOOSE);
           strlcpy(statusText, "choose WiFi", sizeof(statusText));
           break;

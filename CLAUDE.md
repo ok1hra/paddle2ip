@@ -87,9 +87,12 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
 - Encoder via PCNT (x4), `ENC_DIRECTION = −1` (the first hardware feedback
   said it was reversed). `ENC_COUNTS_PER_DETENT = 4` still to verify.
 - USB network (`usbnet.cpp`): the build stays `USBMode=hwcdc` (console, web
-  flasher, panic output unchanged). Network mode is chosen at run time
-  (display menu when SOF frames show a computer, 10 s → saved `usbNet`, NVS
-  key `usbnet`): `USB.begin()` moves the PHY to USB-OTG, composite TinyUSB
+  flasher, panic output unchanged). Network mode is chosen at run time in
+  ONE network menu (user's request): saved WiFi in range + "USB network"
+  while SOF frames show a computer, shown with >= 2 choices; without WiFi it
+  is USB network / "Serial + WiFi", a later plug-in offers the same; 10 s →
+  USB if `usbNet` (last answer, NVS key `usbnet`) else the strongest WiFi.
+  `USB.begin()` moves the PHY to USB-OTG, composite TinyUSB
   CDC (console via `con()`) + CDC-NCM. Back to serial = reboot;
   `usbnet_early()` clears the RTC PHY select (it survives warm resets).
   The user chose this over a fixed TinyUSB build.
@@ -98,9 +101,12 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
   entries under one mutex (USB task vs. TCP/IP task); padding added so an
   NTB never ends on a 64 B boundary (no ZLP from the controller).
 - Paddle2IP is a DHCP client, the computer shares (NM `ipv4.method shared`).
-  esp_netif route_prio 200. While USB has an address WiFi is OFF (user's
-  choice; also lwIP would route the WiFi subnet over WiFi). No STATUS over USB
-  for 10 s → USB netif down, WiFi back until the NCM link re-attaches.
+  esp_netif route_prio 200. In network mode WiFi is OFF from the choice on,
+  never joined as standby (user's choice after the first hardware test; also
+  lwIP would route the WiFi subnet over WiFi). No USB address 20 s after the
+  start / re-attach → WiFi on meanwhile, an address turns it off again. No
+  STATUS over USB for 10 s → USB netif down, WiFi back until the NCM link
+  re-attaches.
   Session id is generated as soon as the radio is on, not with the link.
 - mDNS `paddle2ip.local` (ESPmDNS, started in web_begin) for WiFi, AP and
   USB. IDF 4.4 mDNS only knows predefined netif keys, so the USB netif uses
@@ -172,7 +178,10 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
    after a save run from web_loop 1 s later, once the answer is out.
 9. USB network (CDC-NCM) to a computer, preferred over WiFi: run-time
    switch from the Serial-JTAG (menu on plug-in, function USB, web), WiFi
-   off while USB has an address, 10 s fallback, crash guard. No OI3 change:
+   off while USB has an address, 10 s fallback, crash guard.
+10. After the first hardware test (choosing Network still joined WiFi as
+   standby): one network menu with WiFi + USB network, WiFi off from the
+   USB choice with a 20 s DHCP wait, `USB: NO DHCP` / `USB: NO LINK` warnings. No OI3 change:
    `rkey.ino` takes the peer address from every authenticated packet.
 
 ## Open items

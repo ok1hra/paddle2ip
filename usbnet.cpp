@@ -8,14 +8,18 @@
 // back to the Serial-JTAG, also after a crash).
 //
 // The computer shares its connectivity (NetworkManager "shared": DHCP + NAT),
-// Paddle2IP is a DHCP client. While the USB interface has an address WiFi is
-// off: lwIP sends to the WiFi subnet over WiFi whatever the route priority.
-// No STATUS for FALLBACK_MS over USB -> the USB interface is taken down and
-// WiFi comes back, until the cable (or the host's NCM interface) re-attaches.
+// Paddle2IP is a DHCP client. WiFi is off in network mode: lwIP sends to the
+// WiFi subnet over WiFi whatever the route priority. WiFi comes back
+//   - while the USB has no address DHCP_WAIT_MS after the start / re-attach
+//     (the USB keeps asking; an address switches WiFi off again),
+//   - after FALLBACK_MS without a STATUS over USB: the USB interface is taken
+//     down until the cable (or the host's NCM interface) re-attaches.
 //
-// Mode choice: g_set.usbNet. When a computer appears on the cable (SOF frames
-// on the Serial-JTAG; a charger sends none) the display offers Serial /
-// Network and takes the saved choice after 10 s (ui.cpp). A crash within
+// Mode choice: when a computer appears on the cable (SOF frames on the
+// Serial-JTAG; a charger sends none), "USB network" is offered once per
+// plug-in (usbnet_offered): at power-on in the network menu together with the
+// saved WiFi networks in range (wlan.cpp, ui.cpp), later as USB network /
+// serial. g_set.usbNet = the last answer, preselected. A crash within
 // STABLE_MS after starting network mode keeps the next boot in Serial.
 //
 // NCM class driver: ncm_device.c (TinyUSB 0.15.0), registered as an app
@@ -36,20 +40,21 @@
 #include "soc/usb_serial_jtag_reg.h"
 
 static const uint32_t FALLBACK_MS = 10000;      // no STATUS over USB this long -> WiFi
+static const uint32_t DHCP_WAIT_MS = 20000;     // no USB address this long -> WiFi meanwhile
 static const uint32_t STABLE_MS   = 60000;      // network mode survived: crash guard off
 static const uint32_t RTC_MAGIC   = 0x55534E31; // "USN1"
 
 static RTC_NOINIT_ATTR uint32_t rtcMagic;
 static RTC_NOINIT_ATTR uint32_t rtcStarting;    // network mode started < STABLE_MS before the reset
 
-enum UState : uint8_t { U_SERIAL, U_CHOOSE, U_NET };
-static UState   ust = U_SERIAL;
+static bool     netMode = false;                // TinyUSB runs (until reboot)
 static bool     failed = false;                 // network mode crashed: this boot stays Serial
-static bool     asked = false;                  // menu shown for this plug-in of the cable
+static bool     asked = false;                  // answered for this plug-in of the cable
+static bool     host = false;                   // a computer on the cable (SOF frames)
 static uint16_t sofLast = 0;
 static uint32_t sofMs = 0;
 static bool     sofSeen = false;
-static uint32_t netStartMs = 0;
+static uint32_t netStartMs = 0, waitMs = 0;
 
 static USBCDC*            cdc = nullptr;
 static esp_netif_t*       netif = nullptr;
@@ -63,8 +68,12 @@ static uint32_t           freshMs = 0;
 static uint8_t            devMac[6], hostMac[6];
 static char               macDesc[13], macText[18];
 
-bool        usbnet_choosing() { return ust == U_CHOOSE; }
-bool        usbnet_active()   { return ust == U_NET; }
+bool        usbnet_offered()  { return host && !asked && !netMode && !failed && !wlan_setup_mode(); }
+bool        usbnet_choosing() { return usbnet_offered() && wlan_boot_decided() && !wlan_choosing(); }
+bool        usbnet_active()   { return netMode; }
+bool        usbnet_link()     { return linkPrev; }
+bool        usbnet_fallback() { return fallback; }
+
 bool        usbnet_up()       { return ipUp; }
 bool        usbnet_failed()   { return failed; }
 IPAddress   usbnet_ip()       { return IPAddress(ipAddr); }
@@ -178,8 +187,8 @@ static uint16_t ncm_descriptor(uint8_t* dst, uint8_t* itf) {
 }
 
 static void net_start() {
-  ust = U_NET;
-  netStartMs = millis();
+  netMode = true;
+  netStartMs = waitMs = millis();
   rtcStarting = 1;
   ncmMtx = xSemaphoreCreateMutex();
 
@@ -215,8 +224,8 @@ static void net_start() {
 }
 
 void usbnet_choose(bool net) {
-  if (ust == U_NET) return;
-  if (net) net_start(); else ust = U_SERIAL;
+  asked = true;
+  if (net && !netMode) net_start();
 }
 
 static bool any_wifi() {
@@ -226,24 +235,18 @@ static bool any_wifi() {
 
 void usbnet_service() {
   uint32_t ms = millis();
-  if (ust != U_NET) {
+  if (!netMode) {
     // a computer on the cable sends a SOF frame every 1 ms (11-bit frame number)
     uint16_t f = sof_frame();
     if (f != sofLast) { sofLast = f; sofMs = ms; sofSeen = true; }
-    bool host = sofSeen && ms - sofMs < 500;
-    if (!host) {
-      if (ust == U_CHOOSE) ust = U_SERIAL;
-      if (ms - sofMs > 2000) asked = false;      // unplugged: ask again next time
-    } else if (!asked) {
-      asked = true;
-      if (!failed && !wlan_setup_mode()) ust = U_CHOOSE;
-    }
+    host = sofSeen && ms - sofMs < 500;
+    if (ms - sofMs > 2000) asked = false;        // unplugged: offer it again next time
     return;
   }
 
   if (rtcStarting && ms - netStartMs > STABLE_MS) rtcStarting = 0;
   bool link = tud_mounted() && !tud_suspended() && ncmAlt;
-  if (link && !linkPrev) fallback = false;       // (re)attached: USB first again
+  if (link && !linkPrev) { fallback = false; waitMs = ms; }   // (re)attached: USB first again
   linkPrev = link;
   bool want = link && !fallback;
   if (want != linkUp) {
@@ -261,6 +264,8 @@ void usbnet_service() {
   if (!has || L.fresh) freshMs = ms;
   if (has && g_set.keySet && g_set.host[0] && any_wifi() && ms - freshMs > FALLBACK_MS) fallback = true;
 
-  // the session id needs the radio on once (true RNG), see net.cpp
-  wlan_suspend(has && net_session() != 0 && !wlan_setup_mode());
+  // WiFi off while USB has an address or may still get one; the session id
+  // needs the radio on once (true RNG, net.cpp), it was on since power-on
+  bool wait = !has && ms - waitMs < DHCP_WAIT_MS;
+  wlan_suspend(!fallback && (has || wait) && net_session() != 0 && !wlan_setup_mode());
 }

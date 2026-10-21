@@ -103,9 +103,11 @@ void        wlan_connect(int8_t slot);  // -1 = best saved network in the air
 const char* wlan_status();              // short text for the display
 bool        wlan_scan_start();          // refresh the list for the web page
 bool        wlan_scanning();
-// After power-on with >= 2 saved networks in range the join waits for a choice:
-// wlan_choices() lists them (slot, RSSI; strongest first), wlan_connect(slot) joins.
+// After power-on with >= 2 saved networks in range, or any plus the USB network
+// on offer, the join waits for a choice: wlan_choices() lists them (slot,
+// RSSI; strongest first), wlan_connect(slot) joins.
 bool        wlan_choosing();
+bool        wlan_boot_decided();        // the power-on scan has decided (menu or join)
 uint8_t     wlan_choices(int8_t* slot, int8_t* rssi, uint8_t max);
 uint8_t     wlan_nets(WlanNet* out, uint8_t max);
 void        wlan_suspend(bool off);     // radio off while the USB network carries the traffic
@@ -115,9 +117,12 @@ void        wlan_suspend(bool off);     // radio off while the USB network carri
 // Ethernet over TinyUSB) is chosen on the display when a computer appears.
 void        usbnet_early();             // first in setup(): PHY back to Serial-JTAG, crash guard
 void        usbnet_service();
-bool        usbnet_choosing();          // display menu Serial / Network is up
-void        usbnet_choose(bool net);    // menu answer; true starts network mode (until reboot)
+bool        usbnet_offered();           // a computer is plugged in, not answered yet: menu item
+bool        usbnet_choosing();          // USB network / serial menu of its own (plug-in after boot)
+void        usbnet_choose(bool net);    // answer; true starts network mode (until reboot)
 bool        usbnet_active();            // network mode running
+bool        usbnet_link();              // network mode: the computer enabled the NCM interface
+bool        usbnet_fallback();          // network mode: no STATUS over USB, USB down, WiFi on
 bool        usbnet_up();                // USB link with an IP address (any task)
 bool        usbnet_failed();            // network mode crashed last time, this boot stays Serial
 IPAddress   usbnet_ip();

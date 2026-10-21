@@ -12,10 +12,13 @@
 // password, page URL and WiFi status instead of frequency / warning / link.
 // Setup screen (AP mode): encoder selects a saved network or "best in range",
 // short press joins it; on success Paddle2IP leaves setup mode.
-// Choose screen (power-on, >= 2 saved networks in range): encoder selects,
-// short press joins; untouched for CHOOSE_AUTO_MS it joins the strongest.
-// USB screen (a computer appeared on the cable, before the WiFi choice):
-// serial / network, untouched for CHOOSE_AUTO_MS it takes the saved mode.
+// Choose screen: every network that is there, the saved WiFi networks in
+// range (strongest first) and "USB network" while a computer is on the cable;
+// shown at power-on when there are two or more (two WiFi, WiFi + USB, or USB
+// network / serial without WiFi), and as USB network / serial when a
+// computer is plugged in later. Encoder selects, short press takes it;
+// untouched for CHOOSE_AUTO_MS the default is taken: the USB network if it
+// was the last answer (g_set.usbNet), else the strongest WiFi.
 // Long press (both): service page (IP, RSSI, server, counters, legend of the
 // main screen status line).
 #include "shared.h"
@@ -39,13 +42,10 @@ static int8_t   menuSel = 0;                     // setup menu: 0 = best in rang
 static const uint32_t FUNC_HOLD_MS = 20000;      // back to WPM after the last change
 static const uint32_t INFO_HOLD_MS = 60000;
 static const uint32_t TRACE_HOLD_US = 10000000;  // trace shown until 10 s after the last edge
-static int8_t   chooseSel = 0;                   // choose menu, 0 = strongest
-static bool     chooseHold = false;              // encoder turned: no automatic join
+static int8_t   chooseSel = 0;                   // choose menu item
+static bool     chooseHold = false;              // encoder turned: no automatic choice
 static uint32_t chooseMs = 0;
 static const uint32_t CHOOSE_AUTO_MS = 10000;
-static int8_t   usbSel = 0;                      // USB menu: 0 = serial, 1 = network
-static bool     usbHold = false;                 // encoder turned: no automatic choice
-static uint32_t usbMs = 0;
 static bool     usbPend = false;                 // F_USB: mode shown, applied by the press
 static bool     rebootAfterSave = false;         // network -> serial needs a reboot
 
@@ -125,22 +125,56 @@ static uint8_t menu_items(int8_t* slotOf) {
   return n;
 }
 
-// USB mode from the menu or F_USB: network starts at once, back to serial reboots
+// USB mode from the menu or F_USB: network starts at once (usbnet.cpp then
+// switches WiFi off), back to serial reboots
 static void usb_set(bool net) {
   if (net != g_set.usbNet) { g_set.usbNet = net; dirty = true; dirtyMs = millis(); }
-  if (net) {
-    usbnet_choose(true);
-    if (wlan_choosing()) wlan_connect(-1);       // WiFi only as standby until USB has an address
-  } else if (usbnet_active()) {
+  if (net) usbnet_choose(true);
+  else if (usbnet_active()) {
     dirty = true; dirtyMs = millis();
     rebootAfterSave = true;
   } else usbnet_choose(false);
 }
 
-static void choose_join() {
+// choose menu: saved WiFi networks in range, then the USB network; without
+// WiFi to choose, serial stands against the USB network
+enum ChoiceKind : uint8_t { C_WIFI, C_USB, C_SERIAL };
+struct Choice { ChoiceKind kind; int8_t slot, rssi; };
+
+static bool choosing() { return wlan_choosing() || usbnet_choosing(); }
+
+static uint8_t choices(Choice* c) {             // room for WIFI_SLOTS + 1
+  uint8_t n = 0;
   int8_t slot[WIFI_SLOTS], rssi[WIFI_SLOTS];
-  uint8_t n = wlan_choices(slot, rssi, WIFI_SLOTS);
-  if (n) wlan_connect(slot[chooseSel < n ? chooseSel : 0]);
+  uint8_t k = wlan_choices(slot, rssi, WIFI_SLOTS);
+  for (uint8_t i = 0; i < k; i++) c[n++] = { C_WIFI, slot[i], rssi[i] };
+  if (usbnet_offered()) {
+    c[n++] = { C_USB, -1, 0 };
+    if (n == 1) c[n++] = { C_SERIAL, -1, 0 };
+  }
+  return n;
+}
+
+static uint8_t choice_default(const Choice* c, uint8_t n) {
+  ChoiceKind want = g_set.usbNet ? C_USB : C_WIFI;   // WiFi: the first = strongest
+  for (uint8_t i = 0; i < n; i++) if (c[i].kind == want) return i;
+  for (uint8_t i = 0; i < n; i++) if (c[i].kind == C_SERIAL) return i;
+  return 0;
+}
+
+static void choose_take() {
+  Choice c[WIFI_SLOTS + 1];
+  uint8_t n = choices(c);
+  if (!n) { if (wlan_choosing()) wlan_connect(-1); return; }   // the offer went away
+  const Choice& x = c[chooseSel < n ? chooseSel : 0];
+  if (x.kind == C_USB) {                         // WiFi off at once: the USB item is gone
+    usb_set(true);                               // from the list now, a lone WiFi would be taken
+    wlan_suspend(true);
+    return;
+  }
+  if (usbnet_offered()) usb_set(false);          // answered: serial, remembered
+  if (x.kind == C_WIFI) wlan_connect(x.slot);
+  else if (wlan_choosing()) wlan_connect(-1);    // serial: WiFi as soon as one is in range
 }
 
 // ---------------- server address ----------------
@@ -165,7 +199,11 @@ static const char* warning(const LinkState& L, uint16_t* col) {
   if (usbnet_failed() && millis() < 60000) { *col = TFT_ORANGE; return "USB NET FAILED"; }
   if (rebootAfterSave)          { *col = TFT_ORANGE; return "REBOOT..."; }
   if (!g_set.keySet)            return "NO KEY";
-  if (!L.wifi && !L.usb)        return usbnet_active() ? "NO NET" : "NO WIFI";
+  if (!L.wifi && !L.usb) {
+    if (!usbnet_active() || usbnet_fallback()) return "NO WIFI";
+    *col = TFT_ORANGE;                           // the computer does not share (yet)
+    return usbnet_link() ? "USB: NO DHCP" : "USB: NO LINK";
+  }
   if (!L.peer)                  return "NO SERVER";
   if (!L.fresh)                 return "NO LINK";
   if (L.flags & RKEY_SF_NONCE_BAD) { *col = TFT_ORANGE; return "SYNC"; }
@@ -440,64 +478,44 @@ template <class G> static void draw_choose(G& g, const LinkState& L) {
   g.setTextDatum(middle_center);
   g.setFont(&fonts::FreeSansBold9pt7b);
   g.setTextColor(TFT_YELLOW);
-  g.drawString("CHOOSE WiFi", 120, 44);
-  int8_t slot[WIFI_SLOTS], rssi[WIFI_SLOTS];
-  uint8_t n = wlan_choices(slot, rssi, WIFI_SLOTS);
+  g.drawString("CHOOSE NETWORK", 120, 44);
+  Choice c[WIFI_SLOTS + 1];
+  uint8_t n = choices(c);
   if (chooseSel >= n) chooseSel = n ? n - 1 : 0;
   char s[40];
-  int y = 120 - (n - 1) * 13;                    // list centred, 26 px rows, max WIFI_SLOTS = 4
+  int y = 120 - (n - 1) * 13;                    // list centred, 26 px rows, max WIFI_SLOTS + 1 = 5
   for (uint8_t i = 0; i < n; i++, y += 26) {
     bool sel = (i == chooseSel);
     if (sel) g.fillRoundRect(28, y - 11, 184, 22, 5, 0x2945);
     g.setFont(&fonts::Font2);
-    snprintf(s, sizeof(s), "%s", g_set.ssid[slot[i]]);
+    if (c[i].kind == C_WIFI) snprintf(s, sizeof(s), "%s", g_set.ssid[c[i].slot]);
+    else strcpy(s, c[i].kind == C_USB ? "USB network" : "Serial + WiFi");
     if (g.textWidth(s) > 136) g.setFont(&fonts::Font0);
     g.setTextDatum(middle_left);
     g.setTextColor(sel ? TFT_YELLOW : TFT_LIGHTGREY);
     g.drawString(s, 36, y);
     g.setFont(&fonts::Font2);
-    snprintf(s, sizeof(s), "%d", rssi[i]);
     g.setTextDatum(middle_right);
-    g.setTextColor(rssi[i] >= RSSI_GOOD ? TFT_GREEN : rssi[i] >= RSSI_EDGE ? TFT_ORANGE : TFT_RED);
-    g.drawString(s, 204, y);
+    if (c[i].kind == C_WIFI) {
+      snprintf(s, sizeof(s), "%d", c[i].rssi);
+      g.setTextColor(c[i].rssi >= RSSI_GOOD ? TFT_GREEN : c[i].rssi >= RSSI_EDGE ? TFT_ORANGE : TFT_RED);
+      g.drawString(s, 204, y);
+    } else if (c[i].kind == C_USB) {
+      g.setTextColor(TFT_GREEN);
+      g.drawString("USB", 204, y);
+    }
   }
   g.setTextDatum(middle_center);
   g.setFont(&fonts::Font2);
   g.setTextColor(0x8410);
-  g.drawString("turn = select, press = join", 120, 186);
-  if (!chooseHold) {
+  g.drawString("turn = select, press = take", 120, 186);
+  if (!chooseHold && n) {
     uint32_t left = (CHOOSE_AUTO_MS - (millis() - chooseMs) + 999) / 1000;
-    snprintf(s, sizeof(s), "join in %lu s", (unsigned long)left);
+    const Choice& d = c[chooseSel];
+    snprintf(s, sizeof(s), "%.14s in %lu s", d.kind == C_WIFI ? g_set.ssid[d.slot] : d.kind == C_USB ? "USB" : "serial",
+             (unsigned long)left);
     g.setTextColor(TFT_ORANGE);
     g.drawString(s, 120, 204);
-  }
-}
-
-template <class G> static void draw_usb(G& g, const LinkState& L) {
-  g.fillScreen(TFT_BLACK);
-  draw_ring(g, L);
-  g.setTextDatum(middle_center);
-  g.setFont(&fonts::FreeSansBold9pt7b);
-  g.setTextColor(TFT_YELLOW);
-  g.drawString("USB MODE", 120, 52);
-  static const char* const item[2] = { "Serial (console)", "Network" };
-  for (int i = 0; i < 2; i++) {
-    int y = 107 + 26 * i;
-    bool sel = (i == usbSel);
-    if (sel) g.fillRoundRect(28, y - 11, 184, 22, 5, 0x2945);
-    g.setFont(&fonts::Font2);
-    g.setTextColor(sel ? TFT_YELLOW : TFT_LIGHTGREY);
-    g.drawString(item[i], 120, y);
-  }
-  g.setFont(&fonts::Font2);
-  g.setTextColor(0x8410);
-  g.drawString("turn = select, press = OK", 120, 166);
-  if (!usbHold) {
-    char s[32];
-    uint32_t left = (CHOOSE_AUTO_MS - (millis() - usbMs) + 999) / 1000;
-    snprintf(s, sizeof(s), "%s in %lu s", g_set.usbNet ? "network" : "serial", (unsigned long)left);
-    g.setTextColor(TFT_ORANGE);
-    g.drawString(s, 120, 186);
   }
 }
 
@@ -553,8 +571,7 @@ template <class G> static void draw_info(G& g, const LinkState& L) {
 template <class G> static void paint(G& g, const LinkState& L) {
   if (infoPage)                 draw_info(g, L);
   else if (wlan_setup_mode())   draw_setup(g);
-  else if (usbnet_choosing())   draw_usb(g, L);
-  else if (wlan_choosing())     draw_choose(g, L);
+  else if (choosing())          draw_choose(g, L);
   else if (func == F_INFO)      draw_about(g, L);
   else if (func == F_USB)       draw_usbfunc(g, L);
   else                          draw_main(g, L);
@@ -572,17 +589,20 @@ static void draw() {
 // ---------------- task ----------------
 static void ui_task(void*) {
   uint32_t drawMs = 0;
-  bool wasChoose = false, wasUsb = false;
+  bool wasChoose = false;
   for (;;) {
     M5Dial.update();
     uint32_t ms = millis();
     bool setup = wlan_setup_mode();
-    bool usb = usbnet_choosing();
-    bool choose = wlan_choosing() && !usb;       // the WiFi choice waits for the USB one
-    if (usb && !wasUsb) { usbSel = g_set.usbNet; usbHold = false; usbMs = ms; drawMs = 0; }
-    wasUsb = usb;
-    if (choose && !wasChoose) { chooseSel = 0; chooseHold = false; chooseMs = ms; drawMs = 0; }
+    bool choose = choosing();
+    if (choose && !wasChoose) { chooseHold = false; chooseMs = ms; drawMs = 0; }
     wasChoose = choose;
+    if (choose) {
+      Choice c[WIFI_SLOTS + 1];
+      uint8_t n = choices(c);
+      if (!chooseHold) chooseSel = choice_default(c, n);   // follows the list (computer plugged in meanwhile)
+      if (n < 2) { choose_take(); choose = false; }        // nothing left to choose
+    }
     int s = enc_steps();
     if (M5Dial.BtnA.wasHold()) { infoPage = !infoPage; drawMs = 0; }
     else if (M5Dial.BtnA.wasClicked()) {
@@ -592,8 +612,7 @@ static void ui_task(void*) {
         uint8_t n = menu_items(slotOf);
         if (n > 1) wlan_connect(slotOf[menuSel < n ? menuSel : 0]);
       }
-      else if (usb) usb_set(usbSel == 1);
-      else if (choose) choose_join();
+      else if (choose) choose_take();
       else {
         if (func == F_USB && usbPend != usbnet_active()) usb_set(usbPend);
         func = (Func)((func + 1) % F_COUNT); funcMs = ms;
@@ -605,18 +624,14 @@ static void ui_task(void*) {
       if (setup) {
         int8_t slotOf[WIFI_SLOTS + 1];
         menuSel = clampi(menuSel + s, 0, menu_items(slotOf) - 1);
-      } else if (usb) {
-        usbSel = clampi(usbSel + s, 0, 1);
-        usbHold = true;
       } else if (choose) {
-        int8_t slot[WIFI_SLOTS], rssi[WIFI_SLOTS];
-        chooseSel = clampi(chooseSel + s, 0, wlan_choices(slot, rssi, WIFI_SLOTS) - 1);
+        Choice c[WIFI_SLOTS + 1];
+        chooseSel = clampi(chooseSel + s, 0, choices(c) - 1);
         chooseHold = true;
       } else apply_steps(s);
       drawMs = 0;
     }
-    if (usb && !usbHold && ms - usbMs >= CHOOSE_AUTO_MS) usb_set(g_set.usbNet);
-    if (choose && !chooseHold && ms - chooseMs >= CHOOSE_AUTO_MS) choose_join();
+    if (choose && !chooseHold && ms - chooseMs >= CHOOSE_AUTO_MS) choose_take();
     if (func == F_SEND && keyer_msg_active()) funcMs = ms;   // stay while sending
     if (func != F_WPM && ms - funcMs > (func == F_INFO || func == F_USB ? INFO_HOLD_MS : FUNC_HOLD_MS)) { func = F_WPM; drawMs = 0; }
 

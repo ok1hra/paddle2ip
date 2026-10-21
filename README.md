@@ -240,8 +240,7 @@ survive unless the user chooses erase.
 | [Info](#info-function) | function *Info* (short presses) |
 | [Service page](#service-page) | long press, from any screen; short or long press closes it |
 | [Setup screen](#setup-screen) | button held at power-on, or no network saved |
-| [Choose WiFi](#choose-wifi-screen) | power-on with two or more saved networks in range |
-| [USB mode](#usb-mode-screen) | a computer is plugged in (before *Choose WiFi*) |
+| [Choose network](#choose-network-screen) | power-on with two or more networks to choose from (saved WiFi in range, USB network); a computer plugged in later |
 
 #### Main screen
 
@@ -281,7 +280,9 @@ Warnings, in order of priority (only the first one is shown):
 | `USB NET FAILED` (orange) | the USB network mode crashed within a minute after it started; this boot stays in serial mode (shown for the first minute) |
 | `REBOOT...` (orange) | back to serial USB mode, rebooting once the setting is saved |
 | `NO KEY` | no shared key configured |
-| `NO WIFI` | not connected to a WiFi network (`NO NET` in USB network mode: neither USB nor WiFi) |
+| `USB: NO DHCP` (orange) | USB network mode: the computer gives no address, i.e. it does not share its connection (see [USB network](#usb-network)); WiFi takes over after 20 s |
+| `USB: NO LINK` (orange) | USB network mode: the computer has not enabled the Paddle2IP network interface (driver, cable) |
+| `NO WIFI` | not connected to a WiFi network |
 | `NO SERVER` | no server address, or the host name has not resolved yet (after a failed DNS lookup the last known address stays in use) |
 | `NO LINK` | no STATUS from the server for 1 s |
 | `SYNC` (orange) | the server refused a stale nonce; resolves itself with the next STATUS |
@@ -332,37 +333,33 @@ Yellow ring. See [Setup mode](#setup-mode).
 | state | WiFi state, `scanning...` while scanning |
 | `turn = select, press = join` | |
 
-#### Choose WiFi screen
+#### Choose network screen
 
-Shown after power-on when the first scan finds two or more saved networks
-(see [WiFi](#wifi)).
+Lists every network that is there: the saved WiFi networks in range
+(strongest first, from the power-on scan) and `USB network` while a computer
+is on the USB cable (a charger does not count). Shown
 
-| Line | Content |
-|---|---|
-| `CHOOSE WiFi` | |
-| list | the saved networks in range, strongest first, with RSSI in dBm (green / orange / red as on the main screen); the selected one is highlighted |
-| `turn = select, press = join` | |
-| `join in 10 s` | countdown: untouched, the strongest network is joined; it stops when the encoder is turned |
+- after power-on when there are two or more choices: two WiFi networks, a
+  WiFi network and the USB network, or, without a saved network in range,
+  `USB network` / `Serial + WiFi`;
+- when a computer is plugged in later: `USB network` / `Serial + WiFi`.
 
-#### USB mode screen
-
-Shown when a computer appears on the USB cable (a charger does not count),
-once per plug-in; not in setup mode and not after a crash of the network mode.
-See [USB network](#usb-network).
+With a single choice nothing is asked. The USB network is offered once per
+plug-in, not in setup mode and not after a crash of the network mode.
 
 | Line | Content |
 |---|---|
-| `USB MODE` | |
-| `Serial (console)` / `Network` | the saved mode is preselected |
-| `turn = select, press = OK` | |
-| `serial in 10 s` / `network in 10 s` | countdown: untouched, the saved mode is taken; it stops when the encoder is turned |
+| `CHOOSE NETWORK` | |
+| list | WiFi: SSID and RSSI in dBm (green / orange / red as on the main screen); `USB network` (`USB` in green): the computer's connection, WiFi off ([USB network](#usb-network)); `Serial + WiFi`: USB stays the serial console, WiFi as soon as a saved network is in range |
+| `turn = select, press = take` | |
+| `<name> in 10 s` | countdown: untouched, the default is taken: `USB network` if it was the last answer with a computer, else the strongest WiFi network. It stops when the encoder is turned |
 
 ### Encoder and button
 
-| Action | Key screen | Setup / Choose WiFi screen |
+| Action | Key screen | Setup / Choose network screen |
 |---|---|---|
-| turn | change the selected value | select a network (USB mode screen: serial / network) |
-| short press | next function | join the selected network (USB mode screen: take the mode) |
+| turn | change the selected value | select a network |
+| short press | next function | join / take the selected network |
 | long press | [service page](#service-page) (IP, RSSI, server, session, counters, login, legend) | service page |
 
 Functions (one detent = one step; the display returns to WPM 20 s after the last change):
@@ -399,9 +396,10 @@ nobody uses it.
 Up to four networks are saved. Paddle2IP does **one** scan of all channels
 (about 1.5 s) and joins the strongest saved network in range directly by
 channel and BSSID; it never waits for networks that are not there. After
-power-on, when two or more saved networks are in range, the display asks
-which one to join ([Choose WiFi](#choose-wifi-screen)); without an answer the
-strongest one is joined after 10 s. A lost
+power-on, when two or more saved networks are in range (or one plus the USB
+network), the display asks which one to take
+([Choose network](#choose-network-screen)); without an answer the default is
+taken after 10 s. A lost
 link is re-joined on the same AP for 6 s, then a new scan picks the best
 network again. Scans never run while connected unless the web page asks
 (a scan takes the radio off the channel for a moment). Modem sleep is off.
@@ -415,17 +413,21 @@ WiFi, e.g. the shack PC: no 2.4 GHz radio next to the rig, no WiFi jitter.
   flasher). In **network mode** Paddle2IP switches its USB to a composite
   device: a serial console (another `/dev/ttyACM*`) and an Ethernet interface
   (CDC-NCM; drivers built into Linux, macOS and Windows 10/11).
-- When a computer is plugged in, the display offers *Serial* / *Network*
-  ([USB mode](#usb-mode-screen)); the saved mode is taken after 10 s. The
-  function *USB* or the web page change it too. Back to serial = reboot.
-- Paddle2IP gets its address by DHCP from the computer. As long as the USB
-  interface has an address, WiFi is **off**; the web page is at the USB address
-  or at `http://paddle2ip.local` (mDNS, service page).
+- When a computer is plugged in, `USB network` is an item of the
+  [Choose network](#choose-network-screen) menu next to the WiFi networks in
+  range; the last answer is preselected. The function *USB* or the web page
+  change it too. Back to serial = reboot.
+- Paddle2IP gets its address by DHCP from the computer. In network mode WiFi
+  is **off**; the web page is at the USB address or at
+  `http://paddle2ip.local` (mDNS, service page).
   Two Dials on one computer: the second answers as `paddle2ip-2.local`.
-- Fallback: no answer from the server over USB for 10 s (the computer
-  stopped sharing, has no internet, …) → the USB interface is taken down and
-  WiFi takes over; the session continues (the server follows the new
-  address). USB is used again after the cable is plugged in again.
+- No address from the computer within 20 s (`USB: NO DHCP`, it does not
+  share its connection) → WiFi is switched on meanwhile; once the USB gets an
+  address, WiFi goes off again.
+- No answer from the server over USB for 10 s (the computer stopped sharing,
+  has no internet, …) → the USB interface is taken down and WiFi takes over;
+  the session continues (the server follows the new address). USB is used
+  again after the cable is plugged in again.
 - A crash within a minute after the network mode started makes the next boot
   stay in serial mode (`USB NET FAILED`).
 - Firmware update with the web flasher: in **serial** mode (the network mode
