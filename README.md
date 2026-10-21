@@ -4,12 +4,14 @@
   <img src="doc/paddle2ip.jpg" alt="Paddle2IP on an M5Stack Dial: rig frequency, 28 WPM, TX ring, USB network" width="49%">
   <a href="https://youtu.be/FQNfEtQJDpA" title="Paddle2IP video on YouTube"><img src="https://img.youtube.com/vi/FQNfEtQJDpA/maxresdefault.jpg" alt="Paddle2IP video on YouTube" width="49%"></a>
 </p>
-<p align="center"><a href="https://youtu.be/FQNfEtQJDpA">&#9654; Video on YouTube</a></p>
+<p align="center"><a href="https://youtu.be/FQNfEtQJDpA">&#9654; Video on YouTube</a> &middot;
+  <a href="https://www.printables.com/model/1886030-m5dial-threaded-housing-for-paddle2ip">3D printed threaded housing (Printables)</a></p>
 
 Remote CW paddle over IP. Paddle2IP runs on an **M5Stack Dial v1.1** (ESP32-S3):
 you plug a paddle into it, it keys a local iambic keyer with zero-latency
-sidetone, and sends the **key edges with their exact timestamps** over WiFi/UDP
-to a server at the transceiver. The server replays every edge a fixed time
+sidetone, and sends the **key edges with their exact timestamps** over UDP
+(WiFi, or the [USB cable to a computer](#usb-network) that shares its
+connection) to a server at the transceiver. The server replays every edge a fixed time
 later (the playout delay), so the marks and spaces on air are as long as the
 keyer made them, whatever the network jitter is.
 
@@ -29,11 +31,12 @@ paddle ─► Paddle2IP: iambic keyer ─► sidetone (buzzer / headphones, 0 ms
           server (OI3, WIFILT): jitter buffer ─► CW key line (+ PTT sequencer)
                       │ STATUS: nonce, RTT echo, rig freq/mode, counters
                       ▼
-          Paddle2IP display: WPM, link, delay, rig freq/mode, WiFi signal
+          Paddle2IP display: WPM, link, delay, rig freq/mode, WiFi signal / USB
 ```
 
-> Status: the firmware builds and its keyer, protocol and test tools are
-> verified on a PC; it has **not been tested on hardware yet**.
+> Status: in use on the M5Stack Dial v1.1, over WiFi and over the USB
+> network with Linux (Debian 13, GNOME). Not tested yet: the USB network with
+> Windows and macOS.
 
 ## Quick start
 
@@ -41,7 +44,7 @@ paddle ─► Paddle2IP: iambic keyer ─► sidetone (buzzer / headphones, 0 ms
    (do not connect the red 5 V wire). See [Hardware](#hardware).
 2. **Flash**: open the web flasher **https://ok1hra.github.io/paddle2ip/** in
    Chrome or Edge, connect the Dial with a USB-C data cable and click
-   *Flash firmware*.
+   *Flash firmware* (the Dial in serial USB mode, the default after power-on).
 3. **Setup**: after the first start the display shows **SETUP**. Join the WiFi
    `Paddle2IP-XXXX` (password `paddle2ip`) with a phone; the setup page opens
    by itself (otherwise http://192.168.4.1). Enter your WiFi, the server
@@ -53,7 +56,9 @@ paddle ─► Paddle2IP: iambic keyer ─► sidetone (buzzer / headphones, 0 ms
    `[RkeyKey=...]` line works too), *Save & Restart*.
 5. **Key**: the ring turns green when the server answers. Turn the knob for
    WPM, a short press selects the next function (tone, volume, delay, iambic
-   A/B, rotation, test, info), a long press shows the service page.
+   A/B, rotation, USB, test, info), a long press shows the service page.
+6. **Optional, network over USB**: a computer on the USB cable can carry the
+   traffic instead of WiFi; set it up once, see [USB network](#usb-network).
 
 Details: [First setup](#first-setup), [Operation](#operation).
 
@@ -91,6 +96,7 @@ Details: [First setup](#first-setup), [Operation](#operation).
 | Headphone tone (optional) | Port A **G15** (pin 1, yellow) | PWM square wave: RC low-pass + series resistor, enable on the web page, see [Straight key and headphones](#straight-key-and-headphones-port-a-optional) |
 | Sidetone | internal buzzer G3 | LEDC square wave at the tone frequency; volume 0–100 is mapped to the duty (max 50 %) so that every step of 5 is 2 dB (0 = off) |
 | Encoder / button | G40/G41, G42 | |
+| Housing (optional) | 3D print | threaded housing for the Dial: [Printables 1886030](https://www.printables.com/model/1886030-m5dial-threaded-housing-for-paddle2ip) |
 
 **Do not connect the red 5 V wire** of the Grove cable to the paddle.
 The Dial keeps itself powered from the battery (HOLD = GPIO46, set by `M5Dial.begin()`).
@@ -169,7 +175,11 @@ firmware does not use I²C there.
 
 **Without building:** open the web flasher https://ok1hra.github.io/paddle2ip/
 in Chrome or Edge, connect the Dial over USB-C and click *Flash firmware*.
-Do not erase the device when asked if you want to keep the settings.
+Do not erase the device when asked if you want to keep the settings. The Dial
+must be in serial USB mode (`Serial + WiFi` in the
+[Choose network](#choose-network-screen) menu, or power it on before plugging
+the cable in); in [USB network](#usb-network) mode the browser has to pick
+the port again after the reset.
 
 To build it yourself: Arduino IDE 2.x or arduino-cli with:
 
@@ -199,7 +209,9 @@ checkout next to this one (`OI3_DIR`, default `../../oi3`).
 1. set `FW_REV` in `version.h` to today's date, `YYYYMMDD` (a second release
    on the same day becomes `YYYYMMDD.2`, …)
 2. build (`build.sh`)
-3. upload to a connected Dial; with more serial devices it lists them to choose
+3. upload to a connected Dial (in serial USB mode, see above); with more serial
+   devices it lists them to choose (the Dial is `USB_JTAG_serial_debug_unit`
+   in `/dev/serial/by-id/`)
 4. commit all changes (the message can be edited)
 5. push the current branch
 6. web flasher: generate the page (`tools/webflash/index.html`, ESP Web Tools),
@@ -244,6 +256,7 @@ survive unless the user chooses erase.
 |---|---|
 | [Main screen](#main-screen) | normal operation; the centre shows the selected [function](#encoder-and-button) |
 | [Info](#info-function) | function *Info* (short presses) |
+| [USB](#usb-function) | function *USB* (short presses) |
 | [Service page](#service-page) | long press, from any screen; short or long press closes it |
 | [Setup screen](#setup-screen) | button held at power-on, or no network saved |
 | [Choose network](#choose-network-screen) | power-on with two or more networks to choose from (saved WiFi in range, USB network); a computer plugged in later |
@@ -303,10 +316,22 @@ character is never transmitted. Just continue with the next word.
 
 #### Info function
 
-The function *Info* (and only it) replaces the main screen: `Paddle2IP`, the
+The function *Info* replaces the main screen: `Paddle2IP`, the
 firmware revision `FW YYYYMMDD`, a QR code and the text of the GitHub URL and
 the own IP address (`USB 10.42.0.x` on the USB network, `AP 192.168.4.1`
 when only the own AP runs, `no IP` without a network). It returns to WPM 60 s after the last change.
+
+#### USB function
+
+The function *USB* replaces the main screen too and returns to WPM 60 s after
+the last change. See [USB network](#usb-network).
+
+| Line | Content |
+|---|---|
+| `USB: SERIAL` / `USB: NETWORK` | the mode to apply; turn = change |
+| state | `press = start` (the short press starts the network at once), `press = reboot` (back to serial with a reboot), `USB <IP>` (network running with an address), `no address (DHCP)` (the computer does not share), `turn = change` (serial) |
+| QR code | link to the [USB network](#usb-network) section of this manual (with the computer setup) |
+| `computer setup: manual`, `MAC …` | MAC of the computer's interface (`enx…` on Linux) |
 
 #### Service page
 
@@ -378,9 +403,9 @@ Functions (one detent = one step; the display returns to WPM 20 s after the last
 | Delay D | 0 (= server default; the centre then shows the D the server uses, `DELAY (server)`) or 10–1000 ms | 10 ms |
 | Iambic | A / B | toggle |
 | Rotate | 0 / 180° | toggle |
-| USB | own screen: `USB: SERIAL` / `USB: NETWORK`, turn = change; the short press applies it: `press = start` starts the network at once, `press = reboot` goes back to serial with a reboot (saved as the mode offered at the next plug-in). Below: the USB address, a QR code of the [computer setup](#usb-network) in this manual and the MAC of the computer's interface (stays 60 s) | toggle |
+| USB | serial / network, own [screen](#usb-function); the short press applies it and saves it as the mode offered at the next plug-in (stays 60 s) | toggle |
 | Test | turn = send `TEST` at the set WPM (keys the rig like the paddle; a paddle aborts it) | – |
-| Info | FW revision, QR code + text of the GitHub URL, own IP address (`AP 192.168.4.1` when only the AP runs) (stays 60 s) | – |
+| Info | FW revision, QR code + text of the GitHub URL, own IP address (`USB 10.42.0.x` on the USB network, `AP 192.168.4.1` when only the AP runs) (stays 60 s) | – |
 
 Values are saved to flash 3 s after the last change, but only after the keyer
 has been idle for 2 s (a flash write stalls both CPU cores for a moment).
@@ -614,15 +639,16 @@ When the server sits behind a router with a public IP address, the router
 has to forward the UDP port to it. Only one UDP port is needed, nothing else.
 
 ```
-Paddle2IP ── WiFi ── any NAT ── internet ──► public IP:5690 ── router ──► OI3 192.168.1.220:5690
+Paddle2IP ── WiFi / USB ── any NAT ── internet ──► public IP:5690 ── router ──► OI3 192.168.1.220:5690
           (nothing to set up here)                   (port forward UDP 5690)
 ```
 
 **Paddle2IP side (operator): nothing to set up.** Paddle2IP always starts
 the communication and sends a packet at least every 100 ms, so the NAT
 mapping of the local router stays open and the STATUS replies come back
-through it. It works from a home WiFi, a hotel WiFi or a phone hotspot
-(including mobile operators with carrier-grade NAT).
+through it. It works from a home WiFi, a hotel WiFi, a phone hotspot
+(including mobile operators with carrier-grade NAT) or a computer that shares
+its connection over the [USB network](#usb-network).
 
 **Server side (rig):**
 
@@ -677,8 +703,8 @@ Pitfalls:
 - **Testing from home with the public address** needs NAT loopback (hairpin)
   in the router; many routers do not have it. Use the LAN IP at home, or test
   the public address from a phone hotspot.
-- The ring stays red: check the port forward (UDP, not TCP), the server LAN
-  IP, `RkeyEnable=1` and that both sides have the same shared key.
+- The ring stays grey (`NO LINK`): check the port forward (UDP, not TCP), the
+  server LAN IP, `RkeyEnable=1` and that both sides have the same shared key.
 
 ## Testing without a rig
 
