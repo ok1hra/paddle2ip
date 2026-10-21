@@ -6,6 +6,7 @@
 #include <math.h>
 typedef void* TaskHandle_t; typedef uint32_t TickType_t;
 struct IPAddress { uint32_t a; };
+class Stream;
 struct portMUX_TYPE { int x; };
 #define portMUX_INITIALIZER_UNLOCKED {0}
 #define portENTER_CRITICAL(m) (void)(m)

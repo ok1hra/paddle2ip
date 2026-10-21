@@ -2,9 +2,10 @@
 //
 // Key screen: encoder (PCNT, x4 quadrature) = 1 step of the selected function
 // per detent. Short press: next function (WPM / tone / volume / delay D /
-// iambic A-B / display rotation / test: turn = send "TEST" / info: FW revision,
-// GitHub QR code + own IP); the display falls back to WPM FUNC_HOLD_MS after
-// the last change (info: INFO_HOLD_MS).
+// iambic A-B / display rotation / USB mode: turn = serial or network, the
+// press applies it, QR code of the manual's computer setup / test: turn =
+// send "TEST" / info: FW revision, GitHub QR code + own IP); the display
+// falls back to WPM FUNC_HOLD_MS after the last change (info, USB: INFO_HOLD_MS).
 // While keying, the bottom line shows the trace of the sent elements unless
 // a warning takes it.
 // With the fallback AP up and no WiFi the main screen shows the AP name,
@@ -13,6 +14,8 @@
 // short press joins it; on success Paddle2IP leaves setup mode.
 // Choose screen (power-on, >= 2 saved networks in range): encoder selects,
 // short press joins; untouched for CHOOSE_AUTO_MS it joins the strongest.
+// USB screen (a computer appeared on the cable, before the WiFi choice):
+// serial / network, untouched for CHOOSE_AUTO_MS it takes the saved mode.
 // Long press (both): service page (IP, RSSI, server, counters, legend of the
 // main screen status line).
 #include "shared.h"
@@ -26,7 +29,7 @@ void web_begin();
 void web_loop();
 bool web_take_peer_changed();
 
-enum Func : uint8_t { F_WPM, F_TONE, F_VOL, F_DELAY, F_MODE, F_ROT, F_SEND, F_INFO, F_COUNT };
+enum Func : uint8_t { F_WPM, F_TONE, F_VOL, F_DELAY, F_MODE, F_ROT, F_USB, F_SEND, F_INFO, F_COUNT };
 static Func     func = F_WPM;
 static uint32_t funcMs = 0;
 static bool     infoPage = false;
@@ -40,6 +43,11 @@ static int8_t   chooseSel = 0;                   // choose menu, 0 = strongest
 static bool     chooseHold = false;              // encoder turned: no automatic join
 static uint32_t chooseMs = 0;
 static const uint32_t CHOOSE_AUTO_MS = 10000;
+static int8_t   usbSel = 0;                      // USB menu: 0 = serial, 1 = network
+static bool     usbHold = false;                 // encoder turned: no automatic choice
+static uint32_t usbMs = 0;
+static bool     usbPend = false;                 // F_USB: mode shown, applied by the press
+static bool     rebootAfterSave = false;         // network -> serial needs a reboot
 
 static M5Canvas canvas(&M5Dial.Display);
 static bool     haveCanvas = false;
@@ -103,6 +111,7 @@ static void apply_steps(int s) {
     case F_ROT:
       if (s & 1) g_set.rot180 = !g_set.rot180;   // applied in draw()
       break;
+    case F_USB: if (s & 1) usbPend = !usbPend; return;   // applied by the press
     default: break;
   }
   dirty = true; dirtyMs = millis();
@@ -114,6 +123,18 @@ static uint8_t menu_items(int8_t* slotOf) {
   slotOf[n++] = -1;
   for (int i = 0; i < WIFI_SLOTS; i++) if (g_set.ssid[i][0]) slotOf[n++] = i;
   return n;
+}
+
+// USB mode from the menu or F_USB: network starts at once, back to serial reboots
+static void usb_set(bool net) {
+  if (net != g_set.usbNet) { g_set.usbNet = net; dirty = true; dirtyMs = millis(); }
+  if (net) {
+    usbnet_choose(true);
+    if (wlan_choosing()) wlan_connect(-1);       // WiFi only as standby until USB has an address
+  } else if (usbnet_active()) {
+    dirty = true; dirtyMs = millis();
+    rebootAfterSave = true;
+  } else usbnet_choose(false);
 }
 
 static void choose_join() {
@@ -133,7 +154,7 @@ static void peer_service(bool force) {
   IPAddress ip;
   if (!g_set.host[0]) { net_set_peer(0); resolveOk = false; return; }
   if (ip.fromString(g_set.host)) { net_set_peer((uint32_t)ip); resolveOk = true; return; }
-  if (!WiFi.isConnected()) return;
+  if (!WiFi.isConnected() && !usbnet_up()) return;
   if (WiFi.hostByName(g_set.host, ip) == 1 && (uint32_t)ip != 0) { net_set_peer((uint32_t)ip); resolveOk = true; }
   else resolveOk = false;                         // keep the last known address
 }
@@ -141,8 +162,10 @@ static void peer_service(bool force) {
 // ---------------- display ----------------
 static const char* warning(const LinkState& L, uint16_t* col) {
   *col = TFT_RED;
+  if (usbnet_failed() && millis() < 60000) { *col = TFT_ORANGE; return "USB NET FAILED"; }
+  if (rebootAfterSave)          { *col = TFT_ORANGE; return "REBOOT..."; }
   if (!g_set.keySet)            return "NO KEY";
-  if (!L.wifi)                  return "NO WIFI";
+  if (!L.wifi && !L.usb)        return usbnet_active() ? "NO NET" : "NO WIFI";
   if (!L.peer)                  return "NO SERVER";
   if (!L.fresh)                 return "NO LINK";
   if (L.flags & RKEY_SF_NONCE_BAD) { *col = TFT_ORANGE; return "SYNC"; }
@@ -173,6 +196,16 @@ template <class G> static void draw_halo(G& g, const char* t, int x, int y, uint
 // weakest), dBm above the packet loss up/down on the right. Green / orange =
 // at the edge / red = drop-outs likely.
 template <class G> static void draw_signal(G& g, const LinkState& L) {
+  if (L.usb) {                                   // cable: no signal to show, only the loss
+    char loss[16], up_[6], dn[6];
+    if (L.upLossPct == 255) strcpy(up_, "-"); else snprintf(up_, sizeof(up_), "%u", L.upLossPct);
+    if (L.dnLossPct == 255) strcpy(dn, "-"); else snprintf(dn, sizeof(dn), "%u", L.dnLossPct);
+    snprintf(loss, sizeof(loss), "%s/%s%%", up_, dn);
+    g.setFont(&fonts::Font2);
+    draw_halo(g, "USB", 40, 120, TFT_GREEN);    // in place of the bars
+    draw_halo(g, loss, 198, 120, TFT_LIGHTGREY);
+    return;
+  }
   bool up = WiFi.isConnected();
   int rssi = up ? WiFi.RSSI() : -127;
   uint16_t col = !up ? (uint16_t)0x8410 : rssi >= RSSI_GOOD ? (uint16_t)TFT_GREEN
@@ -230,9 +263,36 @@ template <class G> static void draw_about(G& g, const LinkState& L) {
   char s[24];
   g.setFont(&fonts::Font2);
   g.setTextColor(TFT_CYAN);
-  if (WiFi.isConnected())  g.drawString(WiFi.localIP().toString().c_str(), 120, 208);
+  if (L.usb)               g.drawString(("USB " + usbnet_ip().toString()).c_str(), 120, 208);
+  else if (WiFi.isConnected()) g.drawString(WiFi.localIP().toString().c_str(), 120, 208);
   else if (wlan_ap_on())   { snprintf(s, sizeof(s), "AP %s", WiFi.softAPIP().toString().c_str()); g.drawString(s, 120, 208); }
   else                     { g.setTextColor(0x8410); g.drawString("no IP", 120, 208); }
+}
+
+// "USB" function: mode (turn = change, press = apply), QR code of the manual
+// section with the computer's setup, MAC of the computer's interface
+template <class G> static void draw_usbfunc(G& g, const LinkState& L) {
+  g.fillScreen(TFT_BLACK);
+  draw_ring(g, L);
+  g.setTextDatum(middle_center);
+  g.setFont(&fonts::FreeSansBold9pt7b);
+  g.setTextColor(TFT_YELLOW);
+  g.drawString(usbPend ? "USB: NETWORK" : "USB: SERIAL", 120, 28);
+  g.setFont(&fonts::Font2);
+  char s[32];
+  if (usbPend != usbnet_active())  { g.setTextColor(TFT_ORANGE); strcpy(s, usbPend ? "press = start" : "press = reboot"); }
+  else if (usbnet_active())        { g.setTextColor(L.usb ? TFT_GREEN : TFT_ORANGE);
+                                     if (L.usb) snprintf(s, sizeof(s), "USB %s", usbnet_ip().toString().c_str());
+                                     else strcpy(s, "no address (DHCP)"); }
+  else                             { g.setTextColor(0x8410); strcpy(s, "turn = change"); }
+  g.drawString(s, 120, 48);
+  g.qrcode(USB_DOC_URL, 64, 62, 111, 1, true);   // 29 modules x 3 px + 4-module quiet zone
+  g.setTextColor(TFT_CYAN);
+  g.drawString("computer setup: manual", 120, 188);
+  snprintf(s, sizeof(s), "MAC %s", usbnet_host_mac());
+  if (g.textWidth(s) > 160) g.setFont(&fonts::Font0);   // round panel at y 206
+  g.setTextColor(TFT_LIGHTGREY);
+  g.drawString(s, 120, 206);
 }
 
 // Font2 line, Font0 when wider than w (long passwords / status texts)
@@ -251,7 +311,7 @@ template <class G> static void draw_main(G& g, const LinkState& L) {
   char s[40];
   // fallback AP and no STA: no frequency, warning or link numbers to show,
   // the screen tells how to reach the web page instead
-  bool ap = wlan_ap_on() && !L.wifi;
+  bool ap = wlan_ap_on() && !L.wifi && !L.usb;
   g.setFont(&fonts::Font4);
   if (ap) {
     snprintf(s, sizeof(s), "AP %s", wlan_ap_name());
@@ -413,6 +473,34 @@ template <class G> static void draw_choose(G& g, const LinkState& L) {
   }
 }
 
+template <class G> static void draw_usb(G& g, const LinkState& L) {
+  g.fillScreen(TFT_BLACK);
+  draw_ring(g, L);
+  g.setTextDatum(middle_center);
+  g.setFont(&fonts::FreeSansBold9pt7b);
+  g.setTextColor(TFT_YELLOW);
+  g.drawString("USB MODE", 120, 52);
+  static const char* const item[2] = { "Serial (console)", "Network" };
+  for (int i = 0; i < 2; i++) {
+    int y = 107 + 26 * i;
+    bool sel = (i == usbSel);
+    if (sel) g.fillRoundRect(28, y - 11, 184, 22, 5, 0x2945);
+    g.setFont(&fonts::Font2);
+    g.setTextColor(sel ? TFT_YELLOW : TFT_LIGHTGREY);
+    g.drawString(item[i], 120, y);
+  }
+  g.setFont(&fonts::Font2);
+  g.setTextColor(0x8410);
+  g.drawString("turn = select, press = OK", 120, 166);
+  if (!usbHold) {
+    char s[32];
+    uint32_t left = (CHOOSE_AUTO_MS - (millis() - usbMs) + 999) / 1000;
+    snprintf(s, sizeof(s), "%s in %lu s", g_set.usbNet ? "network" : "serial", (unsigned long)left);
+    g.setTextColor(TFT_ORANGE);
+    g.drawString(s, 120, 186);
+  }
+}
+
 template <class G> static void draw_info(G& g, const LinkState& L) {
   g.fillScreen(TFT_BLACK);
   g.setTextDatum(middle_center);
@@ -427,13 +515,21 @@ template <class G> static void draw_info(G& g, const LinkState& L) {
     snprintf(s, sizeof(s), "AP %s", wlan_ap_name()); line(s);
     snprintf(s, sizeof(s), "http://%s", WiFi.softAPIP().toString().c_str()); line(s);
   }
-  if (WiFi.isConnected()) {
+  if (usbnet_active()) {
+    if (L.usb) snprintf(s, sizeof(s), "USB http://%s", usbnet_ip().toString().c_str());
+    else       strcpy(s, "USB net: no address");
+    line(s);
+  }
+  bool sta = WiFi.isConnected();
+  if (sta) {
     int r = WiFi.RSSI();
     g.setTextColor(r >= RSSI_GOOD ? TFT_GREEN : r >= RSSI_EDGE ? TFT_ORANGE : TFT_RED);
     snprintf(s, sizeof(s), "%.20s %ddBm", WiFi.SSID().c_str(), r); line(s);
     g.setTextColor(TFT_WHITE);
     snprintf(s, sizeof(s), "http://%s", WiFi.localIP().toString().c_str()); line(s);
   } else { snprintf(s, sizeof(s), "STA %.22s", wlan_status()); line(s); }
+  // mDNS name, while a network has us; only if the 4 lines below still fit
+  if ((sta || L.usb) && y <= 157 - 4 * 15) { g.setTextColor(TFT_CYAN); line(MDNS_URL); g.setTextColor(TFT_WHITE); }
   snprintf(s, sizeof(s), "SRV %.24s:%u", g_set.host[0] ? g_set.host : "-", g_set.port); line(s);
   snprintf(s, sizeof(s), "sessID %04X tx %lu", net_session(), (unsigned long)L.txPkts); line(s);
   snprintf(s, sizeof(s), "bad tag %lu | %c key%s", (unsigned long)L.badTag, g_set.mode, g_set.swap ? " swap" : ""); line(s);
@@ -457,8 +553,10 @@ template <class G> static void draw_info(G& g, const LinkState& L) {
 template <class G> static void paint(G& g, const LinkState& L) {
   if (infoPage)                 draw_info(g, L);
   else if (wlan_setup_mode())   draw_setup(g);
+  else if (usbnet_choosing())   draw_usb(g, L);
   else if (wlan_choosing())     draw_choose(g, L);
   else if (func == F_INFO)      draw_about(g, L);
+  else if (func == F_USB)       draw_usbfunc(g, L);
   else                          draw_main(g, L);
 }
 
@@ -474,12 +572,15 @@ static void draw() {
 // ---------------- task ----------------
 static void ui_task(void*) {
   uint32_t drawMs = 0;
-  bool wasChoose = false;
+  bool wasChoose = false, wasUsb = false;
   for (;;) {
     M5Dial.update();
     uint32_t ms = millis();
     bool setup = wlan_setup_mode();
-    bool choose = wlan_choosing();
+    bool usb = usbnet_choosing();
+    bool choose = wlan_choosing() && !usb;       // the WiFi choice waits for the USB one
+    if (usb && !wasUsb) { usbSel = g_set.usbNet; usbHold = false; usbMs = ms; drawMs = 0; }
+    wasUsb = usb;
     if (choose && !wasChoose) { chooseSel = 0; chooseHold = false; chooseMs = ms; drawMs = 0; }
     wasChoose = choose;
     int s = enc_steps();
@@ -491,14 +592,22 @@ static void ui_task(void*) {
         uint8_t n = menu_items(slotOf);
         if (n > 1) wlan_connect(slotOf[menuSel < n ? menuSel : 0]);
       }
+      else if (usb) usb_set(usbSel == 1);
       else if (choose) choose_join();
-      else { func = (Func)((func + 1) % F_COUNT); funcMs = ms; }
+      else {
+        if (func == F_USB && usbPend != usbnet_active()) usb_set(usbPend);
+        func = (Func)((func + 1) % F_COUNT); funcMs = ms;
+        if (func == F_USB) usbPend = usbnet_active();
+      }
       drawMs = 0;
     }
     if (s && !infoPage) {                         // service page: turns would change hidden values
       if (setup) {
         int8_t slotOf[WIFI_SLOTS + 1];
         menuSel = clampi(menuSel + s, 0, menu_items(slotOf) - 1);
+      } else if (usb) {
+        usbSel = clampi(usbSel + s, 0, 1);
+        usbHold = true;
       } else if (choose) {
         int8_t slot[WIFI_SLOTS], rssi[WIFI_SLOTS];
         chooseSel = clampi(chooseSel + s, 0, wlan_choices(slot, rssi, WIFI_SLOTS) - 1);
@@ -506,17 +615,20 @@ static void ui_task(void*) {
       } else apply_steps(s);
       drawMs = 0;
     }
+    if (usb && !usbHold && ms - usbMs >= CHOOSE_AUTO_MS) usb_set(g_set.usbNet);
     if (choose && !chooseHold && ms - chooseMs >= CHOOSE_AUTO_MS) choose_join();
     if (func == F_SEND && keyer_msg_active()) funcMs = ms;   // stay while sending
-    if (func != F_WPM && ms - funcMs > (func == F_INFO ? INFO_HOLD_MS : FUNC_HOLD_MS)) { func = F_WPM; drawMs = 0; }
+    if (func != F_WPM && ms - funcMs > (func == F_INFO || func == F_USB ? INFO_HOLD_MS : FUNC_HOLD_MS)) { func = F_WPM; drawMs = 0; }
 
     // NVS write stalls both cores -> only while the keyer has been idle for 2 s
     if (dirty && ms - dirtyMs > 3000 && keyer_idle_us((uint32_t)esp_timer_get_time()) > 2000000u) {
       settings_save();
       dirty = false;
+      if (rebootAfterSave) ESP.restart();        // usbnet_early() gives the USB back to the console
     }
 
     console_service();
+    usbnet_service();
     wlan_service();
     peer_service(web_take_peer_changed());
     web_loop();

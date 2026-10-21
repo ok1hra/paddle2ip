@@ -86,6 +86,29 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
   decision), the update itself stays the USB web flasher.
 - Encoder via PCNT (x4), `ENC_DIRECTION = −1` (the first hardware feedback
   said it was reversed). `ENC_COUNTS_PER_DETENT = 4` still to verify.
+- USB network (`usbnet.cpp`): the build stays `USBMode=hwcdc` (console, web
+  flasher, panic output unchanged). Network mode is chosen at run time
+  (display menu when SOF frames show a computer, 10 s → saved `usbNet`, NVS
+  key `usbnet`): `USB.begin()` moves the PHY to USB-OTG, composite TinyUSB
+  CDC (console via `con()`) + CDC-NCM. Back to serial = reboot;
+  `usbnet_early()` clears the RTC PHY select (it survives warm resets).
+  The user chose this over a fixed TinyUSB build.
+- NCM driver: `ncm_device.c` vendored from TinyUSB 0.15.0 (the arduino lib is
+  built without it), registered via the weak `usbd_app_driver_get_cb`, all
+  entries under one mutex (USB task vs. TCP/IP task); padding added so an
+  NTB never ends on a 64 B boundary (no ZLP from the controller).
+- Paddle2IP is a DHCP client, the computer shares (NM `ipv4.method shared`).
+  esp_netif route_prio 200. While USB has an address WiFi is OFF (user's
+  choice; also lwIP would route the WiFi subnet over WiFi). No STATUS over USB
+  for 10 s → USB netif down, WiFi back until the NCM link re-attaches.
+  Session id is generated as soon as the radio is on, not with the link.
+- mDNS `paddle2ip.local` (ESPmDNS, started in web_begin) for WiFi, AP and
+  USB. IDF 4.4 mDNS only knows predefined netif keys, so the USB netif uses
+  if_key `ETH_DEF` (no real Ethernet here) and posts IP_EVENT_ETH_GOT_IP.
+  Shown on the service page only if the 4 lines below it still fit.
+- Crash guard: RTC_NOINIT flag set when network mode starts, cleared after
+  60 s; a panic/WDT/brownout reset with it set → that boot stays serial.
+- The arduino "usbd" task is unpinned at max−1; lowered to max−3 (below the keyer).
 
 ## Toolchain facts
 
@@ -147,6 +170,10 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
    fade to 91). Sequencer digits light grey instead of red. Web save is
    post/redirect/get (the browser stayed on /save); reboot / AP restart
    after a save run from web_loop 1 s later, once the answer is out.
+9. USB network (CDC-NCM) to a computer, preferred over WiFi: run-time
+   switch from the Serial-JTAG (menu on plug-in, function USB, web), WiFi
+   off while USB has an address, 10 s fallback, crash guard. No OI3 change:
+   `rkey.ino` takes the peer address from every authenticated packet.
 
 ## Open items
 
@@ -159,6 +186,14 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
   consider masking.
 - Nothing has been pushed to GitHub; both repos only have local commits.
   GitHub Pages has to be enabled once (release.sh offers it via `gh`).
+- USB network not run on hardware: SOF host detection, PHY switch both ways
+  (incl. after a crash), NCM with Linux cdc_ncm / Windows / macOS, DHCP from
+  NM shared, edge timing over USB, web flasher from network mode (CDC reset →
+  bootloader). If the TinyUSB 0.15 NCM driver proves flaky, try the rewritten
+  one from TinyUSB ≥ 0.16 (if it builds against the 0.15 core).
+- USB network fallback returns to USB only on re-attach (no periodic retry).
+- mDNS over USB not verified: re-announce after the USB netif goes down/up
+  (no ETH_EVENT is posted), name conflict handling with two Dials.
 - Web flasher not tried on a real Dial yet (auto-reset into download mode
   over USB-Serial-JTAG, QR readability on the round panel).
 

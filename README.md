@@ -65,6 +65,7 @@ Details: [First setup](#first-setup), [Operation](#operation).
   - [Encoder and button](#encoder-and-button)
   - [Setup mode](#setup-mode)
   - [WiFi](#wifi)
+  - [USB network](#usb-network)
   - [Web page](#web-page)
   - [Serial console](#serial-console)
   - [Choosing the playout delay](#choosing-the-playout-delay)
@@ -168,7 +169,9 @@ To build it yourself: Arduino IDE 2.x or arduino-cli with:
 
 - board package **M5Stack** (tested with 2.1.3), board **M5Dial**
   (`m5stack:esp32:m5stack_dial`)
-- *Tools → USB CDC On Boot: **Enabled*** (the serial console runs over USB)
+- *Tools → USB CDC On Boot: **Enabled*** (the serial console runs over USB),
+  *USB Mode: **Hardware CDC and JTAG*** (the [USB network](#usb-network)
+  switches to TinyUSB at run time)
 - library **M5Dial** (pulls in M5Unified and M5GFX; tested with M5Dial 1.0.2,
   M5Unified 0.2.2, M5GFX 0.2.3)
 
@@ -238,6 +241,7 @@ survive unless the user chooses erase.
 | [Service page](#service-page) | long press, from any screen; short or long press closes it |
 | [Setup screen](#setup-screen) | button held at power-on, or no network saved |
 | [Choose WiFi](#choose-wifi-screen) | power-on with two or more saved networks in range |
+| [USB mode](#usb-mode-screen) | a computer is plugged in (before *Choose WiFi*) |
 
 #### Main screen
 
@@ -246,8 +250,8 @@ survive unless the user chooses erase.
 | ring | **red** edge with a fade to black towards the centre = TX on the server (PTT sequencer up, the whole over, not each element); dark green = live link (the server answers our session); grey = no link |
 | top | rig frequency `14 023.75` (MHz kHz.Hz/10, from the server; `-- ---.--` = unknown). The sequencer level n turns the last n digits light grey (0 = none, 5 = five digits) |
 | centre | big value of the selected function with its name below: WPM in white (`WPM`), the others in yellow (`TONE Hz`, `VOLUME %` / `VOLUME (off)`, `DELAY ms` / `DELAY (server)`, `IAMBIC`, `ROTATE (deg)`, `TEST` with `turn = send` / `sending...`) |
-| left of centre | WiFi signal, vertical bargraph of 4 segments (bottom = weakest) |
-| right of centre | WiFi signal in dBm; below it the packet loss `up/down %` (up = Paddle2IP → server as reported by the server, down = server → Paddle2IP; `-` = not known yet) |
+| left of centre | WiFi signal, vertical bargraph of 4 segments (bottom = weakest); green `USB` while the [USB network](#usb-network) carries the traffic |
+| right of centre | WiFi signal in dBm; below it the packet loss `up/down %` (up = Paddle2IP → server as reported by the server, down = server → Paddle2IP; `-` = not known yet). On the USB network only the loss |
 | status line | `R4/3 D120 L0/391`, see below |
 | bottom | the first applicable warning, see below. Without a warning, while you key (until 10 s after the last element), the last 13 characters of the sent elements, e.g. `-.-. --.- / -.-`, newest on the right (letter gap ≥ 2 dits = space, word gap ≥ 5 dits = ` / `). It shows what Paddle2IP sent, not what the server keyed |
 
@@ -274,8 +278,10 @@ Warnings, in order of priority (only the first one is shown):
 
 | Warning | Meaning |
 |---|---|
+| `USB NET FAILED` (orange) | the USB network mode crashed within a minute after it started; this boot stays in serial mode (shown for the first minute) |
+| `REBOOT...` (orange) | back to serial USB mode, rebooting once the setting is saved |
 | `NO KEY` | no shared key configured |
-| `NO WIFI` | not connected to a WiFi network |
+| `NO WIFI` | not connected to a WiFi network (`NO NET` in USB network mode: neither USB nor WiFi) |
 | `NO SERVER` | no server address, or the host name has not resolved yet (after a failed DNS lookup the last known address stays in use) |
 | `NO LINK` | no STATUS from the server for 1 s |
 | `SYNC` (orange) | the server refused a stale nonce; resolves itself with the next STATUS |
@@ -292,8 +298,8 @@ character is never transmitted. Just continue with the next word.
 
 The function *Info* (and only it) replaces the main screen: `Paddle2IP`, the
 firmware revision `FW YYYYMMDD`, a QR code and the text of the GitHub URL and
-the own IP address (`AP 192.168.4.1` when only the own AP runs, `no IP`
-without a network). It returns to WPM 60 s after the last change.
+the own IP address (`USB 10.42.0.x` on the USB network, `AP 192.168.4.1`
+when only the own AP runs, `no IP` without a network). It returns to WPM 60 s after the last change.
 
 #### Service page
 
@@ -304,7 +310,9 @@ encoder does nothing while it is shown.
 |---|---|
 | `Paddle2IP YYYYMMDD` | firmware version |
 | `AP Paddle2IP-XXXX`, `http://192.168.4.1` | only while the own AP runs |
+| `USB http://<IP>` | only in USB network mode; `USB net: no address` without DHCP from the computer |
 | `SSID -62dBm`, `http://<IP>` | joined network and signal (colour as on the main screen) and the web page address; `STA <state>` when not connected |
+| `http://paddle2ip.local` | the web page by name (mDNS), while WiFi or the USB network is up; left out when the page is full |
 | `SRV <host>:<port>` | server address |
 | `sessID XXXX tx N` | session id of this boot and the number of packets sent |
 | `bad tag N \| B key swap` | STATUS packets with a wrong authentication tag (wrong key or spoofing), iambic mode A/B, `swap` = paddles swapped |
@@ -336,12 +344,25 @@ Shown after power-on when the first scan finds two or more saved networks
 | `turn = select, press = join` | |
 | `join in 10 s` | countdown: untouched, the strongest network is joined; it stops when the encoder is turned |
 
+#### USB mode screen
+
+Shown when a computer appears on the USB cable (a charger does not count),
+once per plug-in; not in setup mode and not after a crash of the network mode.
+See [USB network](#usb-network).
+
+| Line | Content |
+|---|---|
+| `USB MODE` | |
+| `Serial (console)` / `Network` | the saved mode is preselected |
+| `turn = select, press = OK` | |
+| `serial in 10 s` / `network in 10 s` | countdown: untouched, the saved mode is taken; it stops when the encoder is turned |
+
 ### Encoder and button
 
 | Action | Key screen | Setup / Choose WiFi screen |
 |---|---|---|
-| turn | change the selected value | select a network |
-| short press | next function | join the selected network |
+| turn | change the selected value | select a network (USB mode screen: serial / network) |
+| short press | next function | join the selected network (USB mode screen: take the mode) |
 | long press | [service page](#service-page) (IP, RSSI, server, session, counters, login, legend) | service page |
 
 Functions (one detent = one step; the display returns to WPM 20 s after the last change):
@@ -354,6 +375,7 @@ Functions (one detent = one step; the display returns to WPM 20 s after the last
 | Delay D | 0 (= server default; the centre then shows the D the server uses, `DELAY (server)`) or 10–1000 ms | 10 ms |
 | Iambic | A / B | toggle |
 | Rotate | 0 / 180° | toggle |
+| USB | own screen: `USB: SERIAL` / `USB: NETWORK`, turn = change; the short press applies it: `press = start` starts the network at once, `press = reboot` goes back to serial with a reboot (saved as the mode offered at the next plug-in). Below: the USB address, a QR code of the [computer setup](#usb-network) in this manual and the MAC of the computer's interface (stays 60 s) | toggle |
 | Test | turn = send `TEST` at the set WPM (keys the rig like the paddle; a paddle aborts it) | – |
 | Info | FW revision, QR code + text of the GitHub URL, own IP address (`AP 192.168.4.1` when only the AP runs) (stays 60 s) | – |
 
@@ -384,9 +406,63 @@ link is re-joined on the same AP for 6 s, then a new scan picks the best
 network again. Scans never run while connected unless the web page asks
 (a scan takes the radio off the channel for a moment). Modem sleep is off.
 
+### USB network
+
+Paddle2IP can use the connectivity of a computer on its USB cable instead of
+WiFi, e.g. the shack PC: no 2.4 GHz radio next to the rig, no WiFi jitter.
+
+- The USB is the serial console by default (USB-Serial-JTAG: console, web
+  flasher). In **network mode** Paddle2IP switches its USB to a composite
+  device: a serial console (another `/dev/ttyACM*`) and an Ethernet interface
+  (CDC-NCM; drivers built into Linux, macOS and Windows 10/11).
+- When a computer is plugged in, the display offers *Serial* / *Network*
+  ([USB mode](#usb-mode-screen)); the saved mode is taken after 10 s. The
+  function *USB* or the web page change it too. Back to serial = reboot.
+- Paddle2IP gets its address by DHCP from the computer. As long as the USB
+  interface has an address, WiFi is **off**; the web page is at the USB address
+  or at `http://paddle2ip.local` (mDNS, service page).
+  Two Dials on one computer: the second answers as `paddle2ip-2.local`.
+- Fallback: no answer from the server over USB for 10 s (the computer
+  stopped sharing, has no internet, …) → the USB interface is taken down and
+  WiFi takes over; the session continues (the server follows the new
+  address). USB is used again after the cable is plugged in again.
+- A crash within a minute after the network mode started makes the next boot
+  stay in serial mode (`USB NET FAILED`).
+- Firmware update with the web flasher: in **serial** mode (the network mode
+  can reset into the bootloader too, but the browser then has to pick the
+  port again).
+
+The computer has to share its connection once. Linux with NetworkManager
+(the MAC is shown by the function *USB* with a QR code of this section, the
+serial command `usb` and the web page):
+
+```
+nmcli con add type ethernet con-name paddle2ip ifname '*' \
+  ethernet.mac-address <MAC> ipv4.method shared ipv6.method ignore
+```
+
+`shared` = DHCP server + NAT on the computer (10.42.0.1/24). The MAC is fixed
+per Dial, the interface is called `enx<MAC>`. With systemd-networkd:
+
+```
+# /etc/systemd/network/50-paddle2ip.network
+[Match]
+Driver=cdc_ncm
+[Network]
+Address=10.42.0.1/24
+DHCPServer=yes
+IPMasquerade=ipv4
+```
+
+Windows: *Internet Connection Sharing* of the internet adapter to the
+Paddle2IP adapter; macOS: *Internet Sharing* to the Paddle2IP USB interface.
+Without sharing Paddle2IP gets no address and keeps using WiFi.
+
 ### Web page
 
-`http://<ip>/`, login user `admin`, password = the web password (default
+`http://<ip>/` or `http://paddle2ip.local/` (mDNS: WiFi, own AP and USB
+network; works on Linux with Avahi, macOS, Windows 10+, iOS, Android 12+),
+login user `admin`, password = the web password (default
 `paddle2ip`, also the AP password). Clients of the Paddle2IP AP need no login,
 because joining the AP already took the same password.
 
@@ -394,6 +470,8 @@ because joining the AP already took the same password.
 - Server: IP or hostname, port, shared key, playout delay D.
 - Keyer: WPM, tone, volume, iambic A/B, paddle swap, straight key on G13,
   headphone tone on G15, display rotation.
+- USB: the USB mode offered at plug-in (network / serial), the MAC of the
+  computer's interface and the `nmcli` command.
 - Login: the web/AP password.
 - *Generate new key*: stores a random key and shows the `[RkeyKey=...]` line for `oi3.cfg`.
 - `/status`: link state as JSON.
@@ -410,11 +488,13 @@ HTTP: keep it on the local network (the key travels with every page load).
 
 ### Serial console
 
-USB, 115200 baud. Use it when the login is lost.
+USB, 115200 baud. Use it when the login is lost. In USB network mode the
+console is on the new serial port of the composite device.
 
 | Command | |
 |---|---|
-| `show` | web login and password, AP name, IP addresses, saved networks, server |
+| `show` | web login and password, AP name, IP addresses, mDNS name, saved networks, server |
+| `usb` | USB mode, USB address, MAC of the computer's interface and the `nmcli` command |
 | `key` | shared key as the `oi3.cfg` line `[RkeyKey=...]` |
 | `resetpass` | web/AP password back to `paddle2ip` |
 | `pass <new>` | set the web/AP password (8–32 chars) |
@@ -537,7 +617,8 @@ cd tools/keyer_sim && g++ -std=gnu++17 -w -Imock -I../.. keyer_sim.cpp -o keyer_
 |---|---|---|---|---|
 | keyer | 1 | max−2 | 1 ms tick: paddle, iambic A/B, sidetone, edge ring | `keyer.cpp` |
 | p2ip-net | 0 | 10 | KEY packets (on every edge + heartbeat), STATUS: nonce, RTT, loss | `net.cpp` |
-| p2ip-ui | 0 | 2 | display, encoder (PCNT), button, WiFi, web page, console, NVS | `ui.cpp`, `wlan.cpp`, `web.cpp`, `console.cpp`, `settings.cpp` |
+| p2ip-ui | 0 | 2 | display, encoder (PCNT), button, WiFi, USB network, web page, console, NVS | `ui.cpp`, `wlan.cpp`, `usbnet.cpp`, `web.cpp`, `console.cpp`, `settings.cpp` |
+| usbd | any | max−3 | TinyUSB (USB network mode only; lowered below the keyer) | `usbnet.cpp`, `ncm_device.c` (TinyUSB 0.15.0 NCM class) |
 
 `shared.h` holds pins, settings and the interfaces between the tasks;
 `rkey_proto.h` is the wire protocol.

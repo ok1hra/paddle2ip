@@ -15,11 +15,13 @@
 // down for 20 s, and closed again 30 s after the STA is back and nobody uses it.
 // Scanning blocks the radio's channel for ~1.5 s, so it never runs while the
 // STA is connected unless the web page asks for it.
+// W_OFF: radio off while the USB network carries the traffic (usbnet.cpp);
+// on resume the usual scan + join starts from W_IDLE.
 #include "shared.h"
 #include <WiFi.h>
 #include <DNSServer.h>
 
-enum WState : uint8_t { W_IDLE, W_SCAN, W_CONNECTING, W_RETRY, W_CONNECTED, W_WAIT, W_CHOOSE };
+enum WState : uint8_t { W_IDLE, W_SCAN, W_CONNECTING, W_RETRY, W_CONNECTED, W_WAIT, W_CHOOSE, W_OFF };
 static WState   st = W_IDLE;
 static uint32_t stMs = 0;              // entered current state
 static uint32_t waitMs = 0;            // W_WAIT duration
@@ -92,7 +94,7 @@ static void scan_start(bool join) {
 
 bool wlan_scan_start() {
   if (st == W_SCAN) return true;
-  if (st == W_CONNECTING || st == W_RETRY || st == W_CHOOSE) return false;
+  if (st == W_CONNECTING || st == W_RETRY || st == W_CHOOSE || st == W_OFF) return false;
   scan_start(false);
   return st == W_SCAN;
 }
@@ -152,6 +154,7 @@ static bool join_best() {
 }
 
 void wlan_connect(int8_t slot) {
+  if (st == W_OFF) return;
   if (slot >= 0 && (slot >= WIFI_SLOTS || !g_set.ssid[slot][0])) return;
   joinSlot = slot;
   joinRequested = true;
@@ -166,10 +169,28 @@ void wlan_connect(int8_t slot) {
   strlcpy(statusText, "scanning...", sizeof(statusText));
 }
 
+void wlan_suspend(bool off) {
+  if (off == (st == W_OFF)) return;
+  if (off) {
+    ap_stop();
+    WiFi.disconnect(false);
+    WiFi.mode(WIFI_OFF);
+    bootChoice = false;
+    set_state(W_OFF);
+    strlcpy(statusText, "off (USB)", sizeof(statusText));
+  } else {
+    WiFi.mode(WIFI_STA);
+    WiFi.setSleep(false);
+    staDownMs = millis();                         // fallback AP only 20 s from now
+    strlcpy(statusText, "", sizeof(statusText));
+    set_state(W_IDLE);
+  }
+}
+
 void wlan_begin(bool setup) {
   WiFi.persistent(false);                         // our NVS only; no flash writes by the WiFi lib
   WiFi.setAutoReconnect(false);                   // re-joining is done here (fast, by BSSID)
-  WiFi.setHostname("paddle2ip");
+  WiFi.setHostname(HOSTNAME);
   uint8_t mac[6]; WiFi.macAddress(mac);
   snprintf(apName, sizeof(apName), "Paddle2IP-%02X%02X", mac[4], mac[5]);
   setupMode = setup || !any_saved();
@@ -247,7 +268,8 @@ void wlan_service() {
       break;
 
     case W_CHOOSE:                                // waits for wlan_connect()
-      staDownMs = ms;                             // no fallback AP while the menu is up
+    case W_OFF:                                   // waits for wlan_suspend(false)
+      staDownMs = ms;                             // no fallback AP meanwhile
       break;
 
     case W_IDLE:

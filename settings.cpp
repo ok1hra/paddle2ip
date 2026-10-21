@@ -20,6 +20,7 @@ void settings_defaults() {
   g_set.skEnable = false;
   g_set.hpEnable = false;
   g_set.rot180   = false;
+  g_set.usbNet   = false;
 }
 
 static int hexval(char c) {
@@ -75,6 +76,7 @@ void settings_load() {
   g_set.skEnable = p.getBool("sk", g_set.skEnable);
   g_set.hpEnable = p.getBool("hp", g_set.hpEnable);
   g_set.rot180   = p.getBool("rot", g_set.rot180);
+  g_set.usbNet   = p.getBool("usbnet", g_set.usbNet);
   p.end();
   if (g_set.delayMs != 0) g_set.delayMs = clampu(g_set.delayMs, 10, DELAY_MAX);
   if (strlen(g_set.webPass) < 8) strcpy(g_set.webPass, WEB_PASS_DEFAULT);
@@ -102,5 +104,6 @@ void settings_save() {
   p.putBool("sk", g_set.skEnable);
   p.putBool("hp", g_set.hpEnable);
   p.putBool("rot", g_set.rot180);
+  p.putBool("usbnet", g_set.usbNet);
   p.end();
 }

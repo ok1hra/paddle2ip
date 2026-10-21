@@ -2,13 +2,14 @@
 //
 //   core 1  keyer task  (1 ms tick)  paddle -> iambic -> sidetone + edge ring
 //   core 0  net task    (1 ms poll)  edge ring -> KEY packets, STATUS -> link state
-//   core 0  ui task                  display, encoder, button, web config, NVS
+//   core 0  ui task                  display, encoder, button, web config, NVS, USB network
 #pragma once
 #include <Arduino.h>
 #include "version.h"
 
 #define FW_VERSION "Paddle2IP " FW_REV
 #define FW_URL     "https://github.com/ok1hra/paddle2ip"
+#define USB_DOC_URL FW_URL "#usb-network"                    // README: setup of the computer
 #define FLASH_URL  "https://ok1hra.github.io/paddle2ip/"   // web flasher (release.sh, gh-pages)
 
 // ---------------- pins (M5Dial v1.1) ----------------
@@ -24,6 +25,8 @@
 #define ENC_COUNTS_PER_DETENT 4
 #define ENC_DIRECTION (-1)      // +1 / -1: clockwise = increase
 
+#define HOSTNAME         "paddle2ip"   // DHCP host name and mDNS name
+#define MDNS_URL         "http://" HOSTNAME ".local"
 #define WEB_USER         "admin"
 #define WEB_PASS_DEFAULT "paddle2ip"
 #define WIFI_SLOTS       4
@@ -49,6 +52,7 @@ struct Settings {
   volatile bool     skEnable;   // straight key on PIN_SK
   volatile bool     hpEnable;   // tone on PIN_HP
   volatile bool     rot180;     // display upside down
+  bool     usbNet;         // USB mode offered when a computer is plugged in: network (else serial)
 };
 extern Settings g_set;
 
@@ -104,6 +108,21 @@ bool        wlan_scanning();
 bool        wlan_choosing();
 uint8_t     wlan_choices(int8_t* slot, int8_t* rssi, uint8_t max);
 uint8_t     wlan_nets(WlanNet* out, uint8_t max);
+void        wlan_suspend(bool off);     // radio off while the USB network carries the traffic
+
+// ---------------- USB network (usbnet.cpp, ui task) ----------------
+// USB is the Serial-JTAG console by default; network mode (CDC console + NCM
+// Ethernet over TinyUSB) is chosen on the display when a computer appears.
+void        usbnet_early();             // first in setup(): PHY back to Serial-JTAG, crash guard
+void        usbnet_service();
+bool        usbnet_choosing();          // display menu Serial / Network is up
+void        usbnet_choose(bool net);    // menu answer; true starts network mode (until reboot)
+bool        usbnet_active();            // network mode running
+bool        usbnet_up();                // USB link with an IP address (any task)
+bool        usbnet_failed();            // network mode crashed last time, this boot stays Serial
+IPAddress   usbnet_ip();
+const char* usbnet_host_mac();          // MAC of the computer's interface (enx...)
+Stream&     con();                      // serial console: Serial-JTAG or the TinyUSB CDC
 
 // ---------------- serial console (console.cpp, ui task) ----------------
 void console_service();
@@ -111,6 +130,7 @@ void console_service();
 // ---------------- net (net.cpp, core 0) ----------------
 struct LinkState {
   bool     wifi;           // STA connected
+  bool     usb;            // USB network up (has an IP address)
   bool     peer;           // server address known
   bool     valid;          // a STATUS was ever received
   bool     fresh;          // last STATUS younger than 1 s

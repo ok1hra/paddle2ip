@@ -165,13 +165,17 @@ static void net_task(void*) {
   uint8_t  rx[128];
   for (;;) {
     bool edge = ulTaskNotifyTake(pdTRUE, 1) > 0;  // wake on edge or after 1 ms
+    // Session id as soon as the radio is on: then esp_random() is a true RNG
+    // (later the USB network may switch WiFi off). A session id repeated after
+    // a reboot would make the OI3 drop our packets (seq restarts at 1) until
+    // it reboots too.
+    if (session == 0 && WiFi.getMode() != WIFI_OFF) { do session = (uint16_t)esp_random(); while (session == 0); }
     bool wifi = WiFi.isConnected();
-    if (ls.wifi != wifi) { portENTER_CRITICAL(&lsMux); ls.wifi = wifi; portEXIT_CRITICAL(&lsMux); }
-    if (!wifi) continue;
-    // Session id only now: with the radio on, esp_random() is a true RNG. A
-    // session id repeated after a reboot would make the OI3 drop our packets
-    // (seq restarts at 1) until it reboots too.
-    if (session == 0) { do session = (uint16_t)esp_random(); while (session == 0); }
+    bool usb  = usbnet_up();
+    if (ls.wifi != wifi || ls.usb != usb) { portENTER_CRITICAL(&lsMux); ls.wifi = wifi; ls.usb = usb; portEXIT_CRITICAL(&lsMux); }
+    if ((!wifi && !usb) || session == 0) continue;
+    // one socket on INADDR_ANY for both: lwIP picks the interface (WiFi is
+    // off while USB has an address), the OI3 follows our source address
     if (sock < 0 && !sock_open()) { vTaskDelay(100); continue; }
 
     for (int k = 0; k < 8; k++) {

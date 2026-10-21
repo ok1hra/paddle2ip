@@ -5,7 +5,8 @@
 // which replays them on the rig's CW key line with a fixed playout delay.
 //
 // Board: M5Stack Arduino core -> "M5Dial" (m5stack:esp32:m5stack_dial),
-//        USB CDC On Boot: Enabled (serial console)
+//        USB CDC On Boot: Enabled (serial console), USB Mode: Hardware CDC and JTAG
+//        (the USB network mode switches to TinyUSB at run time, usbnet.cpp)
 // Libs:  M5Dial (M5Unified, M5GFX)
 // Protocol: rkey_proto.h, identical to the copy in the OI3 firmware.
 //
@@ -18,12 +19,15 @@
 //
 // Hold the button while powering on to enter setup mode (WiFi AP + web page).
 // Serial console (USB, 115200): type help. See README.md.
+// USB network: a computer on the cable can carry the traffic instead of WiFi
+// (chosen on the display, usbnet.cpp).
 #include <M5Dial.h>
 #include "shared.h"
 
 void ui_begin(bool forceSetup);
 
 void setup() {
+  usbnet_early();                  // USB PHY back to the Serial-JTAG console after a warm reset
   auto cfg = M5.config();
   cfg.internal_spk = false;       // G3 is driven by our LEDC sidetone (M5.Speaker buffers)
   cfg.internal_mic = false;

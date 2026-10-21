@@ -10,12 +10,16 @@
 // an eye button shows them), so the key can be copied into oi3.cfg later.
 // Plain HTTP: the key crosses the local network on every page load (accepted).
 //
+// mDNS: the page is also at http://paddle2ip.local, over WiFi, the AP and the
+// USB network alike (the USB netif uses the ETH key, see usbnet.cpp).
+//
 // Save answers with a redirect to the form (post/redirect/get, the result is
 // shown there once), so the browser does not stay on /save. A reboot or an AP
 // restart (new password) waits until the answer has gone out.
 #include "shared.h"
 #include <WiFi.h>
 #include <WebServer.h>
+#include <ESPmDNS.h>
 
 static WebServer server(80);
 static volatile bool peerChanged = false;
@@ -135,6 +139,7 @@ static void handle_root() {
   h += F("<p>"); h += FW_VERSION; h += F(" &middot; ");
   h += WiFi.isConnected() ? ("WiFi " + esc(WiFi.SSID().c_str()) + " " + WiFi.localIP().toString()) : String(F("WiFi not connected"));
   if (wlan_ap_on()) { h += F(" &middot; AP "); h += esc(wlan_ap_name()); }
+  if (usbnet_active()) { h += F(" &middot; USB "); h += usbnet_up() ? usbnet_ip().toString() : String(F("no address")); }
   h += F(" &middot; <a href=/status>status</a></p>");
   h += notice; notice = "";
   h += F("<form method=post action=/save>");
@@ -174,6 +179,13 @@ static void handle_root() {
   check(h, "Straight key on Port A G13", "sk", g_set.skEnable);
   check(h, "Headphone tone on Port A G15 (reboot)", "hp", g_set.hpEnable);
   check(h, "Display rotated 180&deg;", "rot", g_set.rot180);
+  h += F("</fieldset><fieldset><legend>USB</legend>");
+  check(h, "Network over USB: a computer that shares its connection carries the traffic, "
+           "WiFi is off meanwhile (offered on the display when a computer is plugged in; "
+           "off = serial console, needed for the web flasher)", "usbnet", g_set.usbNet);
+  h += F("<p>Computer interface MAC <code>"); h += usbnet_host_mac();
+  h += F("</code>, Linux: <code>nmcli con add type ethernet con-name paddle2ip ifname '*' ethernet.mac-address ");
+  h += usbnet_host_mac(); h += F(" ipv4.method shared ipv6.method ignore</code></p>");
   h += F("</fieldset><fieldset><legend>Login</legend><p>Web user <b>" WEB_USER "</b>. "
          "The password is also the password of the setup AP.</p>");
   pwfield(h, "Password (8-32 chars)", "webpass", esc(g_set.webPass), "minlength=8 maxlength=32");
@@ -252,6 +264,13 @@ static void handle_save() {
   g_set.rot180 = server.hasArg("rot");
   bool hp = server.hasArg("hp");
   if (hp != g_set.hpEnable) { g_set.hpEnable = hp; reboot = true; }
+  // USB mode: network is offered on the display at the next plug-in (the page
+  // may be coming over the USB right now); back to serial needs a reboot
+  bool usbNet = server.hasArg("usbnet");
+  if (usbNet != g_set.usbNet) {
+    g_set.usbNet = usbNet;
+    if (!usbNet && usbnet_active()) reboot = true;
+  }
 
   v = server.arg("webpass");
   if (server.hasArg("webpass") && v != g_set.webPass) {
@@ -302,12 +321,12 @@ static void handle_genkey() {
 static void handle_status() {
   if (!auth()) return;
   LinkState L; net_get(&L);
-  char s[400];
+  char s[448];
   snprintf(s, sizeof(s),
-    "{\"wifi\":%d,\"peer\":%d,\"fresh\":%d,\"sessionOk\":%d,\"flags\":%u,\"freqHz\":%lu,\"civMode\":%u,"
+    "{\"wifi\":%d,\"usb\":%d,\"peer\":%d,\"fresh\":%d,\"sessionOk\":%d,\"flags\":%u,\"freqHz\":%lu,\"civMode\":%u,"
     "\"seqLevel\":%u,\"delayMs\":%u,\"lateEv\":%u,\"lostEv\":%u,\"rttUs\":%ld,\"rttMinUs\":%ld,"
     "\"upLossPct\":%d,\"dnLossPct\":%d,\"badTag\":%lu,\"txPkts\":%lu,\"session\":%u,\"wpm\":%u}",
-    L.wifi, L.peer, L.fresh, L.sessionOk, L.flags, (unsigned long)L.freqHz, L.civMode,
+    L.wifi, L.usb, L.peer, L.fresh, L.sessionOk, L.flags, (unsigned long)L.freqHz, L.civMode,
     L.seqLevel, L.delayMs, L.lateEv, L.lostEv, (long)L.rttUs, (long)L.rttMinUs,
     L.upLossPct == 255 ? -1 : L.upLossPct, L.dnLossPct == 255 ? -1 : L.dnLossPct,
     (unsigned long)L.badTag, (unsigned long)L.txPkts, net_session(), g_set.wpm);
@@ -324,6 +343,7 @@ void web_begin() {
     if (!captive()) server.send(404, "text/plain", "not found");   // captive-portal probes land here
   });
   server.begin();
+  if (MDNS.begin(HOSTNAME)) MDNS.addService("http", "tcp", 80);
 }
 
 void web_loop() {
