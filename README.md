@@ -249,8 +249,8 @@ survive unless the user chooses erase.
 | ring | **red** edge with a fade to black towards the centre = TX on the server (PTT sequencer up, the whole over, not each element); dark green = live link (the server answers our session); grey = no link |
 | top | rig frequency `14 023.75` (MHz kHz.Hz/10, from the server; `-- ---.--` = unknown). The sequencer level n turns the last n digits light grey (0 = none, 5 = five digits) |
 | centre | big value of the selected function with its name below: WPM in white (`WPM`), the others in yellow (`TONE Hz`, `VOLUME %` / `VOLUME (off)`, `DELAY ms` / `DELAY (server)`, `IAMBIC`, `ROTATE (deg)`, `TEST` with `turn = send` / `sending...`) |
-| left of centre | WiFi signal, vertical bargraph of 4 segments (bottom = weakest); green `USB` while the [USB network](#usb-network) carries the traffic |
-| right of centre | WiFi signal in dBm; below it the packet loss `up/down %` (up = Paddle2IP → server as reported by the server, down = server → Paddle2IP; `-` = not known yet). On the USB network only the loss |
+| left of centre | WiFi signal, vertical bargraph of 4 segments (bottom = weakest); a green USB symbol while the [USB network](#usb-network) carries the traffic |
+| right of centre | WiFi signal in dBm (`USB` on the USB network); below it the packet loss `up/down %` (up = Paddle2IP → server as reported by the server, down = server → Paddle2IP; `-` = not known yet) |
 | status line | `R4/3 D120 L0/391`, see below |
 | bottom | the first applicable warning, see below. Without a warning, while you key (until 10 s after the last element), the last 13 characters of the sent elements, e.g. `-.-. --.- / -.-`, newest on the right (letter gap ≥ 2 dits = space, word gap ≥ 5 dits = ` / `). It shows what Paddle2IP sent, not what the server keyed |
 
@@ -406,24 +406,27 @@ network again. Scans never run while connected unless the web page asks
 
 ### USB network
 
-Paddle2IP can use the connectivity of a computer on its USB cable instead of
-WiFi, e.g. the shack PC: no 2.4 GHz radio next to the rig, no WiFi jitter.
+Paddle2IP can use the connection of a computer on its USB cable instead of
+WiFi (Ethernet over USB, CDC-NCM), e.g. the shack PC: no 2.4 GHz radio next
+to the rig and no WiFi jitter. The computer shares its connection: it gives
+Paddle2IP an address (DHCP) and routes its traffic (NAT).
 
-- The USB is the serial console by default (USB-Serial-JTAG: console, web
-  flasher). In **network mode** Paddle2IP switches its USB to a composite
-  device: a serial console (another `/dev/ttyACM*`) and an Ethernet interface
-  (CDC-NCM; drivers built into Linux, macOS and Windows 10/11).
+How it works:
+
+- The USB is the serial console by default (console, web flasher). In
+  **network mode** Paddle2IP turns into a composite USB device: a serial
+  console (a new `/dev/ttyACM*`) and an Ethernet interface. The drivers are
+  built into Linux, macOS and Windows 10/11.
 - When a computer is plugged in, `USB network` is an item of the
   [Choose network](#choose-network-screen) menu next to the WiFi networks in
   range; the last answer is preselected. The function *USB* or the web page
   change it too. Back to serial = reboot.
-- Paddle2IP gets its address by DHCP from the computer. In network mode WiFi
-  is **off**; the web page is at the USB address or at
-  `http://paddle2ip.local` (mDNS, service page).
-  Two Dials on one computer: the second answers as `paddle2ip-2.local`.
-- No address from the computer within 20 s (`USB: NO DHCP`, it does not
-  share its connection) → WiFi is switched on meanwhile; once the USB gets an
-  address, WiFi goes off again.
+- In network mode WiFi is **off**. The main screen shows a green USB
+  symbol and `USB`; the web page is at the USB address or at
+  `http://paddle2ip.local` (mDNS; a second Dial on the same computer answers
+  as `paddle2ip-2.local`).
+- No address from the computer within 20 s (`USB: NO DHCP`) → WiFi is
+  switched on meanwhile; once the USB gets an address, WiFi goes off again.
 - No answer from the server over USB for 10 s (the computer stopped sharing,
   has no internet, …) → the USB interface is taken down and WiFi takes over;
   the session continues (the server follows the new address). USB is used
@@ -434,17 +437,51 @@ WiFi, e.g. the shack PC: no 2.4 GHz radio next to the rig, no WiFi jitter.
   can reset into the bootloader too, but the browser then has to pick the
   port again).
 
-The computer has to share its connection once. Linux with NetworkManager
-(the MAC is shown by the function *USB* with a QR code of this section, the
-serial command `usb` and the web page):
+#### Setting up the computer
+
+Once per computer (and per Dial: the profile is tied to its MAC). The
+computer must be the **router**: IPv4 method *shared* (DHCP server + NAT),
+**not** *automatic (DHCP)*: then both sides wait for an address and the Dial
+shows `USB: NO DHCP`.
+
+The MAC of the computer's interface is shown by the function *USB* on the
+display (with a QR code of this section), by the serial command `usb` and on
+the web page. It is fixed per Dial; Linux names the interface `enx<MAC>`,
+e.g. `enx36b7da561089`.
+
+First choose `USB network` on the Dial, so the computer sees the interface.
+
+**Linux, GNOME** (tested: Debian 13)
+
+1. *Settings → Network*: a new wired device appears (e.g. *USB Ethernet*).
+   Its switch must be **on**.
+2. Gear icon of that connection:
+   - *IPv4*: **Shared to other computers**; leave address and DNS empty.
+   - *IPv6*: **Disable**.
+   - *Identity*: *MAC Address* = the `enx…` device (the profile then belongs
+     to this Dial only); *Connect automatically* on.
+3. *Apply*, switch the connection off and on.
+
+Within a few seconds the computer shows *Connected – 10 Mb/s* (a nominal
+value; full-speed USB carries about 1 MB/s at most, plenty for keying) and the Dial gets 10.42.0.x.
+
+**Linux, KDE Plasma**: *System Settings → Wi-Fi & Networking*, the wired
+connection of the `enx…` device: *IPv4 → Method: Shared to other
+computers*, *IPv6 → Method: Disabled*, *Wired → Restrict to device: enx…*.
+
+**Linux, NetworkManager on the command line** (also without a desktop):
 
 ```
 nmcli con add type ethernet con-name paddle2ip ifname '*' \
   ethernet.mac-address <MAC> ipv4.method shared ipv6.method ignore
 ```
 
-`shared` = DHCP server + NAT on the computer (10.42.0.1/24). The MAC is fixed
-per Dial, the interface is called `enx<MAC>`. With systemd-networkd:
+A profile GNOME has already created with *automatic (DHCP)* (`nmcli con
+show`) is switched over with
+`sudo nmcli con mod "<name>" ipv4.method shared ipv6.method ignore` and
+`sudo nmcli con up "<name>"`. Keep only one profile for the interface.
+
+**Linux, systemd-networkd** (for every Dial, matched by the driver):
 
 ```
 # /etc/systemd/network/50-paddle2ip.network
@@ -456,9 +493,53 @@ DHCPServer=yes
 IPMasquerade=ipv4
 ```
 
-Windows: *Internet Connection Sharing* of the internet adapter to the
-Paddle2IP adapter; macOS: *Internet Sharing* to the Paddle2IP USB interface.
-Without sharing Paddle2IP gets no address and keeps using WiFi.
+**Windows 10/11** (not tested yet): the Dial appears as a new Ethernet
+adapter (*UsbNcm Host Device*). *Control Panel → Network Connections*
+(`ncpa.cpl`) → the adapter with the internet connection → *Properties →
+Sharing* → *Allow other network users to connect through this computer's
+Internet connection*, *Home networking connection* = the Paddle2IP adapter.
+The Dial then gets 192.168.137.x.
+
+**macOS** (not tested yet): *System Settings → General → Sharing → Internet
+Sharing*: share the connection from Wi-Fi / Ethernet to the Paddle2IP USB
+interface, then switch *Internet Sharing* on.
+
+#### Check
+
+- Dial: green USB symbol and `USB` on the main screen, WiFi off; the
+  service page (long press) shows `USB http://<IP>` and `http://paddle2ip.local`.
+- Computer: `ip -br addr | grep enx` shows the interface `UP` with
+  10.42.0.1/24; `ping paddle2ip.local` answers.
+
+#### Troubleshooting
+
+| Symptom | Cause and remedy |
+|---|---|
+| Choosing `USB network` still joins WiFi | the computer gave no address within 20 s, see `USB: NO DHCP` |
+| `USB: NO DHCP` (orange) | the computer does not share: IPv4 method is *automatic (DHCP)* instead of *shared*, the profile is tied to another MAC, or a firewall drops DHCP (ufw: `sudo ufw allow in on enx<MAC>` and `sudo ufw route allow in on enx<MAC>`) |
+| `USB: NO LINK` (orange) | the computer has not enabled the interface: the connection is switched off in GNOME / unmanaged (`nmcli device status`), the cdc_ncm driver did not bind (`sudo dmesg -w` while choosing `USB network`: expect `cdc_acm … ttyACM0` and `cdc_ncm … enx…`), or the computer suspends the USB device (TLP, powertop; see below) |
+| Computer shows *cable unplugged* | old firmware (before the TX FIFO fix in `usbnet.cpp`): update. The console command `usb` must show `notif 2` |
+| Dial has an address, but `NO LINK` | the computer has no internet or a firewall blocks forwarding (VPN, ufw `DEFAULT_FORWARD_POLICY`); after 10 s the Dial falls back to WiFi |
+| USB device suspended | `grep -l Paddle2IP /sys/bus/usb/devices/*/product` gives e.g. `1-5`; `echo on \| sudo tee /sys/bus/usb/devices/1-5/power/control`. Permanently: `/etc/udev/rules.d/50-paddle2ip.rules` with `ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="303a", ATTR{idProduct}=="0002", ATTR{power/control}="on"`; TLP: `USB_DENYLIST="303a:0002"` |
+
+USB IDs: serial mode `303a:1001` (*USB JTAG/serial debug unit*), network
+mode `303a:0002` (*Paddle2IP*; `lsusb -d 303a:`).
+
+The console command `usb` (network mode: the new serial port) shows the
+state of the link, e.g.
+
+```
+USB link  : mounted 1 suspended 0 data-if 1 | ctrl 4 (last 0x0B) notif 2 (2 = link up) | NTB in 52 out 20 | frames tx 52 drop 0 rx 20
+```
+
+| Field | Meaning |
+|---|---|
+| `mounted` / `suspended` | the computer has configured / suspended the USB device |
+| `data-if 1` | the cdc_ncm driver enabled the data interface |
+| `notif 2` | the Dial reported speed and *connected*: the computer has a link (`notif 0` = the computer never read them) |
+| `frames tx / drop / rx` | Ethernet frames sent / dropped / received; `rx` stays 0 = the computer sends nothing |
+
+The lines below it are the USB controller registers, for debugging.
 
 ### Web page
 
@@ -491,12 +572,13 @@ HTTP: keep it on the local network (the key travels with every page load).
 ### Serial console
 
 USB, 115200 baud. Use it when the login is lost. In USB network mode the
-console is on the new serial port of the composite device.
+console is on the new serial port of the composite device. The console ends
+lines with LF only, e.g. `picocom -b 115200 --imap lfcrlf /dev/ttyACM0`.
 
 | Command | |
 |---|---|
 | `show` | web login and password, AP name, IP addresses, mDNS name, saved networks, server |
-| `usb` | USB mode, USB address, MAC of the computer's interface and the `nmcli` command |
+| `usb` | USB mode, USB address, link state ([USB network](#usb-network)), MAC of the computer's interface and the `nmcli` command |
 | `key` | shared key as the `oi3.cfg` line `[RkeyKey=...]` |
 | `resetpass` | web/AP password back to `paddle2ip` |
 | `pass <new>` | set the web/AP password (8–32 chars) |

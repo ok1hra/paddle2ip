@@ -100,8 +100,25 @@ a measured one). The server plays each edge at `t_sender + min_latency + D`
   built without it), registered via the weak `usbd_app_driver_get_cb`, all
   entries under one mutex (USB task vs. TCP/IP task); padding added so an
   NTB never ends on a 64 B boundary (no ZLP from the controller).
+  TinyUSB offers each interface to app drivers FIRST and 0.15 netd_open()
+  does not check the subclass: `d_open` accepts only CDC/NCM, otherwise it
+  took the CDC-ACM console and SET_CONFIGURATION stalled (first hardware
+  test, Linux "can't set config #1, error -32"). Network mode uses PID
+  0x0002 (the board PID 0x1001 is the USB-JTAG). 0.15 also left class
+  requests without data unanswered (Linux SET_ETHERNET_PACKET_FILTER on every
+  rx mode change, 5 s host timeout): now acknowledged, others stalled.
+  Console `usb` prints link counters and DWC2 IN endpoint registers (usbnet_diag).
+- dcd_esp32sx bug (arduino lib, TinyUSB 0.15): IN endpoints get the next free
+  TX FIFO (EP4 console → 1, EP3 NCM notif → 2, EP1 NCM data → 3) but the
+  FIFO size/start is written to DIEPTXF[epnum − 1]; FIFO 2 stayed unset →
+  notification EP answered nothing (usbmon `C Ii … -71`), Linux "cable
+  unplugged". `fix_tx_fifos()` in d_open rewrites DIEPTXF1-4 per FIFO number
+  (RX + EP0 + 4 × 47 words in 1 KB). Found from the register dump.
 - Paddle2IP is a DHCP client, the computer shares (NM `ipv4.method shared`).
-  esp_netif route_prio 200. In network mode WiFi is OFF from the choice on,
+  esp_netif route_prio 50, BELOW the STA (100): esp_netif makes the highest
+  priority netif that is up the default route even without an address, so
+  with 200 the WiFi fallback during the DHCP wait sent everything into the
+  USB (hardware test: NO LINK after the fallback). In network mode WiFi is OFF from the choice on,
   never joined as standby (user's choice after the first hardware test; also
   lwIP would route the WiFi subnet over WiFi). No USB address 20 s after the
   start / re-attach → WiFi on meanwhile, an address turns it off again. No

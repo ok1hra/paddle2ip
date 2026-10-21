@@ -230,18 +230,39 @@ template <class G> static void draw_halo(G& g, const char* t, int x, int y, uint
   g.drawString(t, x, y);
 }
 
+// USB symbol (trident), the USB network's sign in place of the WiFi bars:
+// 24 x 32 px around (cx, cy), 2 px strokes, built from rectangles
+template <class G> static void draw_usb_icon(G& g, int cx, int cy, uint16_t col) {
+  int x = cx - 12, y = cy - 16;
+  for (int j = 0; j < 5; j++) g.fillRect(x + 11 - j, y + j, 2 + 2 * j, 1, col);   // arrow head
+  g.fillRect(x + 11, y + 5, 2, 22, col);                                          // shaft
+  g.fillRect(x + 9, y + 25, 6, 2, col);                                           // base disc
+  g.fillRect(x + 8, y + 27, 8, 2, col);
+  g.fillRect(x + 9, y + 29, 6, 2, col);
+  for (int k = 0; k < 8; k++) g.fillRect(x + 11 - k, y + 22 - k, 2, 2, col);       // left branch
+  g.fillRect(x + 4, y + 12, 2, 4, col);
+  g.fillRect(x + 4, y + 7, 2, 1, col);                                            // round end
+  g.fillRect(x + 3, y + 8, 4, 1, col);
+  g.fillRect(x + 2, y + 9, 6, 2, col);
+  g.fillRect(x + 3, y + 11, 4, 1, col);
+  for (int k = 0; k < 7; k++) g.fillRect(x + 11 + k, y + 18 - k, 2, 2, col);       // right branch
+  g.fillRect(x + 17, y + 10, 2, 3, col);
+  g.fillRect(x + 15, y + 5, 6, 6, col);                                           // square end
+}
+
 // WiFi signal beside the centre value: vertical bargraph on the left (bottom =
 // weakest), dBm above the packet loss up/down on the right. Green / orange =
 // at the edge / red = drop-outs likely.
 template <class G> static void draw_signal(G& g, const LinkState& L) {
-  if (L.usb) {                                   // cable: no signal to show, only the loss
+  if (L.usb) {                                   // cable: USB symbol, "USB" in place of the dBm
     char loss[16], up_[6], dn[6];
     if (L.upLossPct == 255) strcpy(up_, "-"); else snprintf(up_, sizeof(up_), "%u", L.upLossPct);
     if (L.dnLossPct == 255) strcpy(dn, "-"); else snprintf(dn, sizeof(dn), "%u", L.dnLossPct);
     snprintf(loss, sizeof(loss), "%s/%s%%", up_, dn);
+    draw_usb_icon(g, 40, 120, TFT_GREEN);
     g.setFont(&fonts::Font2);
-    draw_halo(g, "USB", 40, 120, TFT_GREEN);    // in place of the bars
-    draw_halo(g, loss, 198, 120, TFT_LIGHTGREY);
+    draw_halo(g, "USB", 198, 111, TFT_GREEN);
+    draw_halo(g, loss, 198, 129, TFT_LIGHTGREY);
     return;
   }
   bool up = WiFi.isConnected();

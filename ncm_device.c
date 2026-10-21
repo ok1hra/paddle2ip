@@ -29,8 +29,8 @@
 /*
  * Paddle2IP: vendored from TinyUSB 0.15.0 (src/class/net/ncm_device.c),
  * the TinyUSB library of arduino-esp32 2.x is built without the NCM class.
- * Only CFG_TUD_NCM, the net_device.h path below and the short-packet padding
- * in ncm_start_tx() differ. The driver is registered at run time by
+ * Only CFG_TUD_NCM, the net_device.h path below, the short-packet padding in
+ * ncm_start_tx() and the answer to class requests without data differ. The driver is registered at run time by
  * usbnet.cpp (usbd_app_driver_get_cb).
  */
 #define CFG_TUD_NCM 1
@@ -409,6 +409,17 @@ bool netd_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t 
       if (NCM_GET_NTB_PARAMETERS == request->bRequest)
       {
         tud_control_xfer(rhport, request, (void*)(uintptr_t) &ntb_parameters, sizeof(ntb_parameters));
+      }
+      // Paddle2IP: acknowledge requests without data (Linux sends
+      // SET_ETHERNET_PACKET_FILTER on every rx mode change; unanswered it
+      // hangs 5 s in the host and delays the link change), stall the rest
+      else if (request->wLength == 0)
+      {
+        tud_control_status(rhport, request);
+      }
+      else
+      {
+        return false;
       }
 
       break;

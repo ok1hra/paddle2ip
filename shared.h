@@ -127,6 +127,7 @@ bool        usbnet_up();                // USB link with an IP address (any task
 bool        usbnet_failed();            // network mode crashed last time, this boot stays Serial
 IPAddress   usbnet_ip();
 const char* usbnet_host_mac();          // MAC of the computer's interface (enx...)
+void        usbnet_diag(char* out, size_t n);   // link counters for the console
 Stream&     con();                      // serial console: Serial-JTAG or the TinyUSB CDC
 
 // ---------------- serial console (console.cpp, ui task) ----------------

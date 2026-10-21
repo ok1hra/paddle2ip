@@ -38,6 +38,7 @@
 #include "driver/periph_ctrl.h"
 #include "soc/rtc_cntl_reg.h"
 #include "soc/usb_serial_jtag_reg.h"
+#include "soc/usb_struct.h"
 
 static const uint32_t FALLBACK_MS = 10000;      // no STATUS over USB this long -> WiFi
 static const uint32_t DHCP_WAIT_MS = 20000;     // no USB address this long -> WiFi meanwhile
@@ -66,6 +67,9 @@ static volatile bool      ipUp = false;
 static volatile uint32_t  ipAddr = 0;
 static uint32_t           freshMs = 0;
 static uint8_t            devMac[6], hostMac[6];
+static uint8_t            epNotif = 0, epData = 0;   // NCM endpoint numbers (diagnostics)
+static volatile uint32_t  nNotif, nNtbIn, nNtbOut, nCtrl, nRx, nTx, nTxDrop;
+static volatile uint8_t   lastReq = 0;
 static char               macDesc[13], macText[18];
 
 bool        usbnet_offered()  { return host && !asked && !netMode && !failed && !wlan_setup_mode(); }
@@ -113,13 +117,35 @@ void usbnet_early() {
 
 // ---------------- NCM <-> TinyUSB ----------------
 static void     d_reset(uint8_t p) { xSemaphoreTake(ncmMtx, portMAX_DELAY); netd_reset(p); ncmAlt = false; xSemaphoreGive(ncmMtx); }
+// dcd_esp32sx (TinyUSB 0.15 in arduino-esp32 2.x) gives each IN endpoint the
+// next free TX FIFO, but writes that FIFO's size/start into DIEPTXF[epnum - 1].
+// With the console on EP4 (FIFO 1) the NCM notification EP3 got FIFO 2, whose
+// register nobody set: the host read only errors (usbmon -71), no carrier.
+// Write the layout the driver meant, per FIFO number, once the last endpoints
+// (NCM) are open and before any IN data: 1 KB FIFO RAM = RX + EP0 + 4 equal.
+static void fix_tx_fifos() {
+  uint32_t used = (USB0.grxfsiz & 0xFFFF) + 16;  // words: RX FIFO + EP0 TX FIFO
+  uint32_t size = (256 - used) / 4;
+  for (uint32_t f = 1; f <= 4; f++) USB0.dieptxf[f - 1] = (size << 16) | (used + size * (f - 1));
+}
+
+// TinyUSB offers every interface to the app drivers first, and netd_open()
+// takes any CDC-like one: without this check it grabbed the console (CDC-ACM)
+// and SET_CONFIGURATION stalled (Linux: "can't set config #1, error -32")
 static uint16_t d_open(uint8_t p, tusb_desc_interface_t const* d, uint16_t n) {
-  xSemaphoreTake(ncmMtx, portMAX_DELAY); uint16_t r = netd_open(p, d, n); xSemaphoreGive(ncmMtx); return r;
+  if (d->bInterfaceClass != TUSB_CLASS_CDC || d->bInterfaceSubClass != CDC_COMM_SUBCLASS_NETWORK_CONTROL_MODEL) return 0;
+  xSemaphoreTake(ncmMtx, portMAX_DELAY); uint16_t r = netd_open(p, d, n); xSemaphoreGive(ncmMtx);
+  if (r) fix_tx_fifos();
+  return r;
 }
 static bool d_ctrl(uint8_t p, uint8_t st, tusb_control_request_t const* rq) {
+  if (st == CONTROL_STAGE_SETUP) { nCtrl++; lastReq = rq->bRequest; }
   xSemaphoreTake(ncmMtx, portMAX_DELAY); bool r = netd_control_xfer_cb(p, st, rq); xSemaphoreGive(ncmMtx); return r;
 }
 static bool d_xfer(uint8_t p, uint8_t ep, xfer_result_t res, uint32_t n) {
+  if (ep == (0x80 | epNotif)) nNotif++;
+  else if (ep == (0x80 | epData)) nNtbIn++;
+  else if (ep == epData) nNtbOut++;
   xSemaphoreTake(ncmMtx, portMAX_DELAY); bool r = netd_xfer_cb(p, ep, res, n); xSemaphoreGive(ncmMtx); return r;
 }
 
@@ -136,7 +162,7 @@ static void ncm_free_rx(void*, void* buf) { free(buf); }
 extern "C" bool tud_network_recv_cb(const uint8_t* src, uint16_t size) {
   if (netif && size) {
     void* b = malloc(size);
-    if (b) { memcpy(b, src, size); esp_netif_receive(netif, b, size, nullptr); }
+    if (b) { memcpy(b, src, size); esp_netif_receive(netif, b, size, nullptr); nRx++; }
   }
   tud_network_recv_renew();                      // next datagram of the NTB, or the next NTB
   return true;
@@ -149,15 +175,16 @@ extern "C" uint16_t tud_network_xmit_cb(uint8_t* dst, void* ref, uint16_t arg) {
 
 // TCP/IP task: both NTBs busy -> wait up to ~5 ms, then drop
 static esp_err_t ncm_transmit(void*, void* buf, size_t len) {
-  if (!ncmAlt || len > 1514) return ESP_FAIL;
+  if (!ncmAlt || len > 1514) { nTxDrop++; return ESP_FAIL; }
   for (int i = 0; i < 5; i++) {
     xSemaphoreTake(ncmMtx, portMAX_DELAY);
     bool ok = tud_network_can_xmit((uint16_t)len);
     if (ok) tud_network_xmit(buf, (uint16_t)len);
     xSemaphoreGive(ncmMtx);
-    if (ok) return ESP_OK;
+    if (ok) { nTx++; return ESP_OK; }
     vTaskDelay(1);
   }
+  nTxDrop++;
   return ESP_FAIL;
 }
 
@@ -175,8 +202,8 @@ static esp_netif_driver_base_t ncmBase = { ncm_post_attach, nullptr };
 static uint16_t ncm_descriptor(uint8_t* dst, uint8_t* itf) {
   uint8_t sName = tinyusb_add_string_descriptor("Paddle2IP Network");
   uint8_t sMac  = tinyusb_add_string_descriptor(macDesc);
-  uint8_t epNotif = tinyusb_get_free_in_endpoint();
-  uint8_t epData  = tinyusb_get_free_duplex_endpoint();
+  epNotif = tinyusb_get_free_in_endpoint();
+  epData  = tinyusb_get_free_duplex_endpoint();
   if (!epNotif || !epData) return 0;
   uint8_t d[TUD_CDC_NCM_DESC_LEN] = {
     TUD_CDC_NCM_DESCRIPTOR(*itf, sName, sMac, (uint8_t)(0x80 | epNotif), 64, epData, (uint8_t)(0x80 | epData), 64, 1514)
@@ -195,7 +222,11 @@ static void net_start() {
   esp_netif_inherent_config_t base = ESP_NETIF_INHERENT_DEFAULT_ETH();
   base.if_key = "ETH_DEF";                       // mDNS (IDF 4.4) serves only its predefined keys
   base.if_desc = "usb";
-  base.route_prio = 200;                         // above the WiFi STA (100)
+  // below the WiFi STA (100): esp_netif makes the highest priority netif that
+  // is up the default route, with or without an address. WiFi only runs
+  // while the USB has no address (DHCP wait) and must win then; once the USB
+  // has one WiFi goes off and the USB is the only netif left.
+  base.route_prio = 50;
   memcpy(base.mac, devMac, 6);
   esp_netif_config_t cfg = {};
   cfg.base = &base;
@@ -217,10 +248,35 @@ static void net_start() {
   tinyusb_enable_interface(USB_INTERFACE_CUSTOM, TUD_CDC_NCM_DESC_LEN, ncm_descriptor);
   cdc->begin(115200);
   USB.productName("Paddle2IP");
+  USB.PID(0x0002);                               // not 0x1001 = the USB-JTAG (host drivers, esptool reset)
   USB.begin();                                   // PHY -> USB-OTG, the computer re-enumerates
   // arduino creates the USB task unpinned at configMAX_PRIORITIES - 1, above the keyer
   TaskHandle_t t = xTaskGetHandle("usbd");
   if (t) vTaskPrioritySet(t, configMAX_PRIORITIES - 3);
+}
+
+// console lines: where a link stalls (host side vs. here); the DWC2 registers
+// of the IN endpoints (DIEPCTL bit 15 = active, bit 31 = transfer armed,
+// bits 22-25 = TX FIFO; DTXFSTS = free words; DIEPTXF = size << 16 | start)
+void usbnet_diag(char* out, size_t n) {
+  if (!netMode) { snprintf(out, n, "serial mode"); return; }
+  int k = snprintf(out, n, "mounted %d suspended %d data-if %d | ctrl %lu (last 0x%02X) notif %lu (2 = link up) | "
+                   "NTB in %lu out %lu | frames tx %lu drop %lu rx %lu\n",
+                   tud_mounted(), tud_suspended(), (int)ncmAlt, (unsigned long)nCtrl, lastReq, (unsigned long)nNotif,
+                   (unsigned long)nNtbIn, (unsigned long)nNtbOut, (unsigned long)nTx, (unsigned long)nTxDrop, (unsigned long)nRx);
+  for (uint8_t e = 1; e <= 5 && k > 0 && (size_t)k < n; e++) {
+    uint32_t c = USB0.in_ep_reg[e].diepctl;
+    if (!(c & (1u << 15))) continue;             // not active
+    uint8_t f = (c >> 22) & 0xF;
+    k += snprintf(out + k, n - k, "            EP%u IN%s: ctl %08lX siz %08lX txfsts %08lX fifo %u busy %d\n",
+                  e, e == epNotif ? " notif" : e == epData ? " data " : "      ", (unsigned long)c,
+                  (unsigned long)USB0.in_ep_reg[e].dieptsiz, (unsigned long)USB0.in_ep_reg[e].dtxfsts, f,
+                  (int)usbd_edpt_busy(0, 0x80 | e));
+  }
+  if (k > 0 && (size_t)k < n)
+    snprintf(out + k, n - k, "            grxfsiz %08lX gnptxfsiz %08lX dieptxf1-4 %08lX %08lX %08lX %08lX",
+             (unsigned long)USB0.grxfsiz, (unsigned long)USB0.gnptxfsiz, (unsigned long)USB0.dieptxf[0],
+             (unsigned long)USB0.dieptxf[1], (unsigned long)USB0.dieptxf[2], (unsigned long)USB0.dieptxf[3]);
 }
 
 void usbnet_choose(bool net) {

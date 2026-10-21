@@ -39,6 +39,9 @@ static void show_usb() {
                usbnet_active() ? "network" : "serial", g_set.usbNet ? "network" : "serial");
   if (usbnet_active())
     con().printf("USB net   : %s\n", usbnet_up() ? usbnet_ip().toString().c_str() : "no address (DHCP from the computer)");
+  char d[640];
+  usbnet_diag(d, sizeof(d));
+  con().printf("USB link  : %s\n", d);
   con().printf("computer  : interface MAC %s, set it up once with\n"
                "  nmcli con add type ethernet con-name paddle2ip ifname '*' ethernet.mac-address %s "
                "ipv4.method shared ipv6.method ignore\n", usbnet_host_mac(), usbnet_host_mac());
