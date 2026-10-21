@@ -1,5 +1,11 @@
 # Paddle2IP
 
+<p align="center">
+  <img src="doc/paddle2ip.jpg" alt="Paddle2IP on an M5Stack Dial: rig frequency, 28 WPM, TX ring, USB network" width="49%">
+  <a href="https://youtu.be/FQNfEtQJDpA" title="Paddle2IP video on YouTube"><img src="https://img.youtube.com/vi/FQNfEtQJDpA/maxresdefault.jpg" alt="Paddle2IP video on YouTube" width="49%"></a>
+</p>
+<p align="center"><a href="https://youtu.be/FQNfEtQJDpA">&#9654; Video on YouTube</a></p>
+
 Remote CW paddle over IP. Paddle2IP runs on an **M5Stack Dial v1.1** (ESP32-S3):
 you plug a paddle into it, it keys a local iambic keyer with zero-latency
 sidetone, and sends the **key edges with their exact timestamps** over WiFi/UDP
