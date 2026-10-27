@@ -19,6 +19,9 @@
 // STA is connected unless the web page asks for it.
 // W_OFF: radio off while the USB network carries the traffic (usbnet.cpp);
 // on resume the usual scan + join starts from W_IDLE.
+// Console log: every join attempt (slot, channel, BSSID), the disconnect
+// reason code from the WiFi stack and status changes; `scan` prints one raw
+// scan including hidden networks and the auth mode of each AP.
 #include "shared.h"
 #include <WiFi.h>
 #include <DNSServer.h>
@@ -39,6 +42,10 @@ static bool     joinRequested = false; // explicit request (setup menu)
 static bool     bootChoice = false;    // until the first join: >= 2 saved in range -> W_CHOOSE
 static bool     bootDecided = false;   // the power-on scan is through (menu or join)
 static char     statusText[48] = "";
+static char     lastLog[48] = "";      // statusText last printed on the console
+static volatile uint8_t discReason = 0; // from the WiFi event task, printed by wlan_service
+static uint8_t  joinReason = 0;        // disconnect reason of the current join attempt
+static bool     scanDump = false;      // console 'scan': print the next scan raw
 
 #define MAX_NETS 20
 static WlanNet  nets[MAX_NETS];
@@ -47,6 +54,27 @@ static int8_t   curSlot = -1;          // slot we are joining / joined
 
 static void set_state(WState s) { st = s; stMs = millis(); }
 static bool any_saved() { for (int i = 0; i < WIFI_SLOTS; i++) if (g_set.ssid[i][0]) return true; return false; }
+static int8_t saved_slot(const char* s) {
+  for (int k = 0; k < WIFI_SLOTS; k++) if (g_set.ssid[k][0] && !strcmp(g_set.ssid[k], s)) return k;
+  return -1;
+}
+
+// Status changes go to the console too, each once (a failing join repeats every few seconds).
+static void log_status() {
+  if (!strcmp(lastLog, statusText)) return;
+  strlcpy(lastLog, statusText, sizeof(lastLog));
+  con().printf("wifi: %s\n", statusText);
+}
+
+static void on_disconnect(arduino_event_id_t, arduino_event_info_t info) {
+  uint8_t r = info.wifi_sta_disconnected.reason;
+  discReason = r ? r : WIFI_REASON_UNSPECIFIED;
+}
+
+static const char* auth_name(int a) {
+  static const char* const n[] = { "open", "WEP", "WPA", "WPA2", "WPA/WPA2", "WPA2-ENT", "WPA3", "WPA2/WPA3", "WAPI" };
+  return a >= 0 && a < (int)(sizeof(n) / sizeof(n[0])) ? n[a] : "?";
+}
 
 bool        wlan_setup_mode() { return setupMode; }
 bool        wlan_ap_on() { return apOn; }
@@ -89,7 +117,9 @@ void wlan_ap_restart() {
 
 static void scan_start(bool join) {
   scanForJoin = join;
-  if (WiFi.scanNetworks(true, false, false, 120) == WIFI_SCAN_FAILED) {
+  // hidden networks too: only the 'scan' dump shows them, scan_collect skips them
+  if (WiFi.scanNetworks(true, true, false, 120) == WIFI_SCAN_FAILED) {
+    if (scanDump) { scanDump = false; con().println("scan: failed to start"); }
     set_state(W_WAIT); waitMs = 2000;
     return;
   }
@@ -103,23 +133,55 @@ bool wlan_scan_start() {
   return st == W_SCAN;
 }
 
-// Copy the scan into nets[], strongest first, one entry per SSID.
+// Console 'scan': every AP of the scan as the WiFi stack returned it.
+static void scan_dump(int n) {
+  if (n < 0) { con().println("scan: failed"); return; }
+  con().printf("scan: %d APs\n", n);
+  bool seen[WIFI_SLOTS] = { false };
+  for (int i = 0; i < n; i++) {
+    String s = WiFi.SSID(i);
+    int8_t k = saved_slot(s.c_str());
+    if (k >= 0) seen[k] = true;
+    const uint8_t* b = WiFi.BSSID(i);
+    con().printf("  %4d dBm ch%2d %02X:%02X:%02X:%02X:%02X:%02X %-9s %s%s%s",
+                 WiFi.RSSI(i), WiFi.channel(i), b[0], b[1], b[2], b[3], b[4], b[5],
+                 auth_name(WiFi.encryptionType(i)), s.length() ? "'" : "<hidden>", s.c_str(), s.length() ? "'" : "");
+    if (k >= 0) con().printf("  <- wifi %d", k + 1);
+    con().println();
+  }
+  for (int k = 0; k < WIFI_SLOTS; k++)
+    if (g_set.ssid[k][0] && !seen[k]) con().printf("  wifi %d '%s' not in this scan\n", k + 1, g_set.ssid[k]);
+}
+
+// Copy the scan into nets[], strongest first, one entry per SSID. When more
+// SSIDs are in the air than nets[] holds, saved networks always get in and
+// the weakest unsaved ones are left out (the scan order is not by RSSI).
 static void scan_collect() {
   int n = WiFi.scanComplete();
+  if (scanDump) { scanDump = false; scan_dump(n); }
   nNets = 0;
-  for (int i = 0; i < n && nNets < MAX_NETS; i++) {
+  for (int i = 0; i < n; i++) {
     String s = WiFi.SSID(i);
     if (!s.length()) continue;
     int dup = -1;
     for (int j = 0; j < nNets; j++) if (s == nets[j].ssid) { dup = j; break; }
     int8_t rssi = (int8_t)WiFi.RSSI(i);
     if (dup >= 0 && nets[dup].rssi >= rssi) continue;
-    WlanNet& e = (dup >= 0) ? nets[dup] : nets[nNets++];
-    strlcpy(e.ssid, s.c_str(), sizeof(e.ssid));
-    e.rssi = rssi;
-    e.ch   = (uint8_t)WiFi.channel(i);
-    memcpy(e.bssid, WiFi.BSSID(i), 6);
-    e.open = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
+    WlanNet* e;
+    if (dup >= 0) e = &nets[dup];
+    else if (nNets < MAX_NETS) e = &nets[nNets++];
+    else {                                         // full: replace the weakest unsaved one
+      int w = -1;
+      for (int j = 0; j < nNets; j++)
+        if (saved_slot(nets[j].ssid) < 0 && (w < 0 || nets[j].rssi < nets[w].rssi)) w = j;
+      if (w < 0 || (saved_slot(s.c_str()) < 0 && nets[w].rssi >= rssi)) continue;
+      e = &nets[w];
+    }
+    strlcpy(e->ssid, s.c_str(), sizeof(e->ssid));
+    e->rssi = rssi;
+    e->ch   = (uint8_t)WiFi.channel(i);
+    memcpy(e->bssid, WiFi.BSSID(i), 6);
+    e->open = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
   }
   WiFi.scanDelete();
   for (int i = 1; i < nNets; i++)                  // sort by RSSI
@@ -146,14 +208,20 @@ static bool join_best() {
       if (!g_set.ssid[k][0] || strcmp(g_set.ssid[k], nets[i].ssid)) continue;
       if (joinSlot >= 0 && k != joinSlot) continue;
       curSlot = k;
+      joinReason = 0;
+      const uint8_t* b = nets[i].bssid;
+      con().printf("wifi: join %d '%s' ch %u %02X:%02X:%02X:%02X:%02X:%02X %d dBm\n",
+                   k + 1, g_set.ssid[k], nets[i].ch, b[0], b[1], b[2], b[3], b[4], b[5], nets[i].rssi);
       WiFi.begin(g_set.ssid[k], g_set.pass[k], nets[i].ch, nets[i].bssid, true);
       snprintf(statusText, sizeof(statusText), "joining %.24s", g_set.ssid[k]);
+      strlcpy(lastLog, statusText, sizeof(lastLog));
       set_state(W_CONNECTING);
       return true;
     }
   }
   if (joinSlot >= 0) snprintf(statusText, sizeof(statusText), "%.24s not found", g_set.ssid[joinSlot]);
   else               strlcpy(statusText, "no saved WiFi in range", sizeof(statusText));
+  log_status();
   return false;
 }
 
@@ -172,6 +240,13 @@ void wlan_connect(int8_t slot) {
   WiFi.disconnect(false);
   scan_start(true);
   strlcpy(statusText, "scanning...", sizeof(statusText));
+}
+
+void wlan_scan_dump() {
+  scanDump = true;
+  if (wlan_scan_start()) return;
+  scanDump = false;
+  con().printf("scan: not now (%s)\n", st == W_OFF ? "WiFi off" : st == W_CHOOSE ? "network menu open" : "joining");
 }
 
 void wlan_suspend(bool off) {
@@ -196,6 +271,7 @@ void wlan_suspend(bool off) {
 void wlan_begin(bool setup) {
   WiFi.persistent(false);                         // our NVS only; no flash writes by the WiFi lib
   WiFi.setAutoReconnect(false);                   // re-joining is done here (fast, by BSSID)
+  WiFi.onEvent(on_disconnect, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.setHostname(HOSTNAME);
   uint8_t mac[6]; WiFi.macAddress(mac);
   snprintf(apName, sizeof(apName), "Paddle2IP-%02X%02X", mac[4], mac[5]);
@@ -218,6 +294,11 @@ void wlan_service() {
   uint32_t ms = millis();
   if (apOn) dns.processNextRequest();
   bool up = WiFi.isConnected();
+  if (uint8_t r = discReason) {
+    discReason = 0;
+    if (st == W_CONNECTING) joinReason = r;
+    con().printf("wifi: disconnected, reason %u %s\n", r, WiFi.disconnectReasonName((wifi_err_reason_t)r));
+  }
 
   switch (st) {
     case W_SCAN:
@@ -248,11 +329,16 @@ void wlan_service() {
         set_state(W_CONNECTED);
         bootChoice = false;
         snprintf(statusText, sizeof(statusText), "%.24s", WiFi.SSID().c_str());
+        strlcpy(lastLog, statusText, sizeof(lastLog));
+        con().printf("wifi: connected '%s' %s %d dBm\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI());
         if (setupMode && joinRequested) { setupMode = false; apIdleMs = ms; }   // leave setup
         joinRequested = false;
       } else if (ms - stMs > 12000) {
         WiFi.disconnect(false);
-        snprintf(statusText, sizeof(statusText), "%.24s failed", curSlot >= 0 ? g_set.ssid[curSlot] : "");
+        const char* ss = curSlot >= 0 ? g_set.ssid[curSlot] : "";
+        if (joinReason) snprintf(statusText, sizeof(statusText), "%.24s failed %u", ss, joinReason);
+        else            snprintf(statusText, sizeof(statusText), "%.24s failed", ss);
+        log_status();
         joinRequested = false;
         set_state(W_WAIT); waitMs = 3000;
       }

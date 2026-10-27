@@ -102,6 +102,7 @@ bool        wlan_is_ap_client(IPAddress local);   // request came in through the
 void        wlan_connect(int8_t slot);  // -1 = best saved network in the air
 const char* wlan_status();              // short text for the display
 bool        wlan_scan_start();          // refresh the list for the web page
+void        wlan_scan_dump();           // console: print the next scan raw
 bool        wlan_scanning();
 // After power-on with >= 2 saved networks in range, or any plus the USB network
 // on offer, the join waits for a choice: wlan_choices() lists them (slot,

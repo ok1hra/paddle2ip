@@ -8,6 +8,7 @@
 //   resetpass         web/AP password back to the default
 //   pass <new>        set the web/AP password (8-32 chars)
 //   wifi              rescan and join the best saved network
+//   scan              print one raw scan (all APs, channel, BSSID, auth, saved slot)
 //   reboot
 #include "shared.h"
 #include <WiFi.h>
@@ -61,13 +62,14 @@ static void exec(char* s) {
   char* arg = strchr(s, ' ');
   if (arg) { *arg++ = 0; while (*arg == ' ') arg++; }
   if (!*s) return;
-  if      (!strcmp(s, "help"))      con().println("commands: show | usb | key | resetpass | pass <new> | wifi | reboot");
+  if      (!strcmp(s, "help"))      con().println("commands: show | usb | key | resetpass | pass <new> | wifi | scan | reboot");
   else if (!strcmp(s, "show"))      show();
   else if (!strcmp(s, "usb"))       show_usb();
   else if (!strcmp(s, "key"))       show_key();
   else if (!strcmp(s, "resetpass")) set_pass(WEB_PASS_DEFAULT);
   else if (!strcmp(s, "pass"))      set_pass(arg ? arg : "");
   else if (!strcmp(s, "wifi"))      { wlan_connect(-1); con().println("scanning for saved networks"); }
+  else if (!strcmp(s, "scan"))      wlan_scan_dump();
   else if (!strcmp(s, "reboot"))    { con().println("reboot"); delay(100); ESP.restart(); }
   else con().printf("unknown '%s', type help\n", s);
 }

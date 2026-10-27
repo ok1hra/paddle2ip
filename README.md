@@ -277,8 +277,15 @@ While the fallback AP is up and no WiFi network is joined (see
 [Setup mode](#setup-mode)), the top shows the AP name `AP Paddle2IP-XXXX` and
 its password, the bottom the page address `http://192.168.4.1` and the WiFi
 status (`scanning...`, `no saved WiFi in range`, `joining <SSID>`,
-`<SSID> failed`, `reconnecting`); the signal, the status line and the
+`<SSID> failed <reason>`, `reconnecting`); the signal, the status line and the
 warnings are hidden. The centre and the encoder work as usual.
+
+`<reason>` is the disconnect code of the WiFi stack, the serial console prints
+it with its name. Common ones: 15 `4WAY_HANDSHAKE_TIMEOUT` and 204
+`HANDSHAKE_TIMEOUT` = wrong password (or WPA/TKIP only, Paddle2IP needs at
+least WPA2), 201 `NO_AP_FOUND`, 202 `AUTH_FAIL`, 203 `ASSOC_FAIL` (the AP
+refused, e.g. a MAC filter or WPA3 settings). For a network that is in range
+but never joined, type `scan` on the [serial console](#serial-console).
 
 WiFi signal colour: green ≥ −65 dBm, orange −65 … −75 dBm (at the edge), red
 below −75 dBm (drop-outs likely). Thresholds: `RSSI_GOOD` / `RSSI_EDGE` in `shared.h`.
@@ -614,6 +621,7 @@ lines with LF only, e.g. `picocom -b 115200 --imap lfcrlf /dev/ttyACM0`.
 | `resetpass` | web/AP password back to `paddle2ip` |
 | `pass <new>` | set the web/AP password (8–32 chars) |
 | `wifi` | rescan and join the best saved network |
+| `scan` | one scan as the radio sees it: every AP with signal, channel, BSSID, security and the saved slot it matches; saved networks missing from the scan are listed |
 | `reboot` | |
 
 ### Choosing the playout delay

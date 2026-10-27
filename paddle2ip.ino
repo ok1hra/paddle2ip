@@ -42,7 +42,7 @@ void setup() {
   settings_load();
   Serial.printf("%s  wpm=%u D=%u key=%s host=%s\n", FW_VERSION, g_set.wpm, g_set.delayMs,
                 g_set.keySet ? "set" : "NOT SET", g_set.host);
-  Serial.println("serial console: type 'help' (show / resetpass / pass / wifi / reboot)");
+  Serial.println("serial console: type 'help' (show / resetpass / pass / wifi / scan / reboot)");
 
   TaskHandle_t net = net_begin();  // core 0
   keyer_begin(net);                // core 1, 1 ms tick
