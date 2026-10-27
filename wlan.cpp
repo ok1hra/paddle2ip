@@ -306,10 +306,10 @@ void wlan_service() {
       // have passed, while the radio is still scanning; its done event later
       // delivers the results all the same. Seen on hardware: every scan
       // "failed", no saved network was ever found. So any negative value
-      // means wait, up to our own 8 s limit.
+      // means wait, up to our own 15 s limit (6.2 s seen with the fallback AP on).
       if (WiFi.scanComplete() < 0) {
-        if (ms - stMs > 8000) {
-          con().println("wifi: scan gave no result in 8 s");
+        if (ms - stMs > 15000) {
+          con().println("wifi: scan gave no result in 15 s");
           scanDump = false;
           WiFi.scanDelete(); set_state(W_WAIT); waitMs = 1000; bootDecided = true;
         }
