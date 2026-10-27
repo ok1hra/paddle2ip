@@ -136,7 +136,7 @@ bool wlan_scan_start() {
 // Console 'scan': every AP of the scan as the WiFi stack returned it.
 static void scan_dump(int n) {
   if (n < 0) { con().println("scan: failed"); return; }
-  con().printf("scan: %d APs\n", n);
+  con().printf("scan: %d APs in %lu ms\n", n, (unsigned long)(millis() - stMs));
   bool seen[WIFI_SLOTS] = { false };
   for (int i = 0; i < n; i++) {
     String s = WiFi.SSID(i);
@@ -302,8 +302,17 @@ void wlan_service() {
 
   switch (st) {
     case W_SCAN:
-      if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
-        if (ms - stMs > 8000) { WiFi.scanDelete(); set_state(W_WAIT); waitMs = 1000; bootDecided = true; }
+      // The library reports WIFI_SCAN_FAILED once 20 x max_ms_per_chan (2.4 s)
+      // have passed, while the radio is still scanning; its done event later
+      // delivers the results all the same. Seen on hardware: every scan
+      // "failed", no saved network was ever found. So any negative value
+      // means wait, up to our own 8 s limit.
+      if (WiFi.scanComplete() < 0) {
+        if (ms - stMs > 8000) {
+          con().println("wifi: scan gave no result in 8 s");
+          scanDump = false;
+          WiFi.scanDelete(); set_state(W_WAIT); waitMs = 1000; bootDecided = true;
+        }
         break;
       }
       scan_collect();
